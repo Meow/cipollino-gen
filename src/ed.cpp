@@ -50,11 +50,11 @@ void to_bytes(uint8_t s[32], fe a)
                                    0x7fffffffffffffffull};
     for (int round = 0; round < 2; round++) {
         uint64_t t[4];
-        unsigned __int128 borrow = 0;
+        uint64_t borrow = 0;
         for (int i = 0; i < 4; i++) {
-            unsigned __int128 d = (unsigned __int128)w[i] - pw[i] - (uint64_t)borrow;
-            t[i] = (uint64_t)d;
-            borrow = (d >> 64) & 1;
+            uint64_t d = w[i] - pw[i];
+            t[i] = d - borrow;
+            borrow = (w[i] < pw[i]) | (d < borrow);
         }
         if (!borrow) memcpy(w, t, sizeof t);
     }

@@ -1,0 +1,12 @@
+{
+  "name": "cipollino",
+  "version-string": "0",
+  "dependencies": [
+    "libsodium",
+    "vulkan-headers",
+    {
+      "name": "glslang",
+      "features": ["tools"]
+    }
+  ]
+}

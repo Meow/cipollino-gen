@@ -95,10 +95,11 @@ def check_key_dir(path, prefixes):
     name = os.path.basename(path)
     assert name.endswith(".onion") and len(name) == 62, name
     addr = name[:-6]
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o700, "directory mode"
+    posix = os.name == "posix"  # Windows has access lists instead of modes
+    assert not posix or stat.S_IMODE(os.stat(path).st_mode) == 0o700, "directory mode"
     assert sorted(os.listdir(path)) == ["hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key"]
-    assert stat.S_IMODE(os.stat(os.path.join(path, "hs_ed25519_secret_key")).st_mode) == 0o600, "secret key mode"
-    assert open(os.path.join(path, "hostname")).read() == name + "\n"
+    assert not posix or stat.S_IMODE(os.stat(os.path.join(path, "hs_ed25519_secret_key")).st_mode) == 0o600, "secret key mode"
+    assert open(os.path.join(path, "hostname"), "rb").read() == (name + "\n").encode()
     pub = open(os.path.join(path, "hs_ed25519_public_key"), "rb").read()
     sec = open(os.path.join(path, "hs_ed25519_secret_key"), "rb").read()
     assert pub[:32] == b"== ed25519v1-public: type0 ==\0\0\0" and len(pub) == 64

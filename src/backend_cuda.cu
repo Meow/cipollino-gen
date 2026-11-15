@@ -3,9 +3,10 @@
 // below and in a few numbers; -DCIP_ROCM selects the ROCm build.
 //
 // For testing on machines without either, this file also builds as plain C++ against
-// tests/cuda_sim.h (CIP_CUDA_SIM), which emulates the handful of runtime calls used here.
+// tests/cuda_sim.h, which emulates the handful of runtime calls used here
+// (tests/sim_backend_cuda.cpp).
 #if defined(CIP_CUDA_SIM)
-// tests/cuda_sim.h was force-included
+// tests/cuda_sim.h has been included
 #elif defined(CIP_ROCM)
 #include "hip_as_cuda.h"
 #define CIP_LAUNCH(kernel, grid, block, ...) kernel<<<(grid), (block)>>>(__VA_ARGS__)

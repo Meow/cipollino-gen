@@ -14,7 +14,9 @@
 
 namespace keys {
 
-typedef __int128 Offset;  // the public walk offset m, in units of 8*B
+// The public walk offset m, in units of 8*B. A kernel thread moves a few thousand to a few
+// million keys per second away from its seed, so 63 bits last longer than any search.
+typedef int64_t Offset;
 
 struct Key {
     uint8_t sk[64];  // expanded secret key: scalar (LE) || nonce prefix, as Tor stores it
@@ -47,8 +49,9 @@ bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std:
               std::string &why);
 
 // Write <dir>/<address>.onion/{hostname,hs_ed25519_public_key,hs_ed25519_secret_key} in the
-// layout Tor's HiddenServiceDir expects (directory 0700, secret key 0600). Refuses to
-// overwrite. Returns false with a message in `err`.
+// layout Tor's HiddenServiceDir expects (directory 0700, secret key 0600; on Windows they
+// take the access list of the directory they are created in). Refuses to overwrite.
+// Returns false with a message in `err`.
 bool write_tor_dir(const std::string &dir, const Key &key, std::string &err);
 
 }  // namespace keys

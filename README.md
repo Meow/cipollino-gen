@@ -27,8 +27,8 @@ cipollya765v….onion/hs_ed25519_secret_key      (mode 0600, directory 0700)
 
 ## Building
 
-Needs a C++17 compiler, make, libsodium (>= 1.0.18) and Python 3 for the tests. `make`
-builds every backend whose toolchain it finds:
+Needs a C++17 compiler, make, libsodium (>= 1.0.18) and Python 3 for the tests (for
+Windows see below). `make` builds every backend whose toolchain it finds:
 
 | backend | needs at build time | at run time |
 |---|---|---|
@@ -52,7 +52,38 @@ make
 The CUDA build targets the GPU in the build machine (`-arch=native`). If your nvcc is
 too old to know that flag, name the generation instead, e.g. `make CUDA_ARCH=sm_75`.
 The ROCm build takes its targets from `ROCM_ARCH`, e.g. `make ROCM_ARCH=gfx11-generic`.
-Windows is not supported (use WSL 2).
+
+### Windows
+
+Windows is built with CMake and Visual Studio 2022's compiler instead of make;
+`vcpkg.json` lists the libraries. The result is a single `cipollino.exe` with the CUDA,
+Vulkan and CPU backends. At run time CUDA needs only the NVIDIA driver and Vulkan only
+the loader that every GPU driver installs; on a machine with neither the program still
+starts and uses the CPU.
+
+```
+:: in an "x64 Native Tools Command Prompt"; install the CUDA toolkit first for that backend
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static
+cmake --build build
+ctest --test-dir build
+```
+
+`-DCIP_CUDA_ARCH=all` makes a program that is not tied to the build machine's GPU. That is
+what `.github/workflows/windows.yml` builds on every push and keeps as the
+`cipollino-windows-x64` artifact.
+
+What differs from the other systems:
+
+- there is no ROCm backend; AMD GPUs are reached through Vulkan;
+- Windows has no file modes, so a key directory gets the access list of the directory it
+  is created in. Keep the output directory somewhere only you can read, such as your
+  profile;
+- Windows resets a GPU that does not answer for two seconds. Launches are far shorter by
+  default; do not raise `--launch-ms` towards that.
+
+The Windows port is new and has not been run on a GPU under Windows yet.
 
 ### Docker
 
@@ -349,8 +380,10 @@ src/kernel/entry_*     per-API kernel entry points (Metal, Vulkan)
 src/backend_*.{cu,mm,cpp}   one per API; backend_cuda.cu is also the ROCm backend
 src/engine.cpp         seeding, launches, hit validation, self-tests
 src/keys.cpp           all secret-key handling (libsodium)
+src/platform.cpp       file and console calls, for POSIX and Windows
 src/ed.cpp             public-point helpers and the kernel table
 src/filter.cpp         prefixes -> GPU filter tables
 src/onion.cpp          SHA3-256, address encoding
 Dockerfile, Dockerfile.rocm, docker/, cipollino-docker    container builds, entry-point guard, run wrapper
+CMakeLists.txt, cmake/, vcpkg.json    the Windows build
 ```

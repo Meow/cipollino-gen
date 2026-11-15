@@ -1,0 +1,87 @@
+# Builds the Windows version: one cipollino.exe with the CUDA, Vulkan and CPU backends,
+# compiled with Visual Studio's compiler through CMake (see CMakeLists.txt).
+#
+# The runner has no GPU, so what is tested here is everything that needs none: the field
+# arithmetic, the CPU backend, the CUDA backend's host code on a simulated runtime, and
+# that the program still starts (and falls back to the CPU) on a machine with no GPU
+# driver at all. The program is kept as the workflow artifact cipollino-windows-x64.
+
+name: Windows build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: CUDA + Vulkan
+    # Visual Studio 2022: the CUDA 12 compiler refuses anything newer.
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    env:
+      # The same toolkit as the Linux image (Dockerfile).
+      CUDA_VERSION: '12.6.3'
+      VCPKG_TRIPLET: x64-windows-static
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the Visual Studio command line
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install the CUDA compiler
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: network
+          sub-packages: '["nvcc", "cudart"]'
+
+      - name: Cache the vcpkg packages
+        uses: actions/cache@v6
+        with:
+          path: vcpkg-cache
+          key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vcpkg-cache | Out-Null
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TRIPLET" `
+            -DCIP_CUDA=ON -DCIP_VULKAN=ON -DCIP_CUDA_ARCH=all
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE gpu
+
+      - name: Check that it runs without a GPU driver
+        shell: pwsh
+        run: |
+          dumpbin /dependents build\cipollino.exe
+          build\cipollino.exe --bench 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item build\cipollino.exe, README.md dist\
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-windows-x64
+          path: dist/
+          if-no-files-found: error

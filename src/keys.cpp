@@ -2,13 +2,10 @@
 
 #include <sodium.h>
 
-#include <cerrno>
 #include <cstring>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "onion.h"
+#include "platform.h"
 
 namespace keys {
 
@@ -38,9 +35,10 @@ static bool is_clamped(const uint8_t a[32]) { return (a[0] & 7) == 0 && (a[31] &
 static bool shift_scalar(uint8_t a[32], Offset m)
 {
     bool negative = m < 0;
-    unsigned __int128 mag = (negative ? (unsigned __int128)(-m) : (unsigned __int128)m) << 3;
-    uint8_t delta[32] = {0};
-    for (int i = 0; i < 16; i++) delta[i] = (uint8_t)(mag >> (8 * i));
+    uint64_t mag = negative ? 0 - (uint64_t)m : (uint64_t)m;
+    uint8_t delta[32] = {0};  // 8 * |m|
+    for (int i = 0; i < 8; i++) delta[i] = (uint8_t)((mag << 3) >> (8 * i));
+    delta[8] = (uint8_t)(mag >> 61);
     if (negative)
         sodium_sub(a, delta, 32);
     else
@@ -136,52 +134,19 @@ bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std:
     return true;
 }
 
-static bool write_file(const std::string &path, const void *data, size_t len, mode_t mode, std::string &err)
-{
-    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, mode);
-    if (fd < 0) {
-        err = path + ": " + strerror(errno);
-        return false;
-    }
-    const uint8_t *p = (const uint8_t *)data;
-    while (len > 0) {
-        ssize_t n = write(fd, p, len);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            err = path + ": " + strerror(errno);
-            close(fd);
-            return false;
-        }
-        p += n;
-        len -= (size_t)n;
-    }
-    if (fsync(fd) != 0 || close(fd) != 0) {
-        err = path + ": " + strerror(errno);
-        return false;
-    }
-    return true;
-}
-
 bool write_tor_dir(const std::string &dir, const Key &key, std::string &err)
 {
-    if (mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) {
-        err = dir + ": " + strerror(errno);
-        return false;
-    }
     std::string sub = dir + "/" + key.address + ".onion";
-    if (mkdir(sub.c_str(), 0700) != 0) {
-        err = sub + ": " + strerror(errno);
-        return false;
-    }
+    if (!plat::make_private_dir(dir, true, err) || !plat::make_private_dir(sub, false, err)) return false;
     // 32-byte headers: the tag padded with NULs.
     uint8_t pub[32 + 32] = "== ed25519v1-public: type0 ==";
     uint8_t sec[32 + 64] = "== ed25519v1-secret: type0 ==";
     memcpy(pub + 32, key.pk, 32);
     memcpy(sec + 32, key.sk, 64);
     std::string host = key.address + ".onion\n";
-    bool ok = write_file(sub + "/hostname", host.data(), host.size(), 0600, err) &&
-              write_file(sub + "/hs_ed25519_public_key", pub, sizeof pub, 0600, err) &&
-              write_file(sub + "/hs_ed25519_secret_key", sec, sizeof sec, 0600, err);
+    bool ok = plat::write_new_file(sub + "/hostname", host.data(), host.size(), err) &&
+              plat::write_new_file(sub + "/hs_ed25519_public_key", pub, sizeof pub, err) &&
+              plat::write_new_file(sub + "/hs_ed25519_secret_key", sec, sizeof sec, err);
     sodium_memzero(sec, sizeof sec);
     return ok;
 }

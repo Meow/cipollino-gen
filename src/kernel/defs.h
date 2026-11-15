@@ -42,9 +42,13 @@ typedef ulong u64;
 typedef uint32_t u32;
 typedef uint64_t u64;
 #define CIP_FN __device__ __forceinline__
-// Spelled as an attribute: CUDA's __noinline__ macro has a history of colliding with
-// libstdc++, which writes __attribute__((__noinline__)).
+// Spelled out: CUDA's __noinline__ macro has a history of colliding with libstdc++, which
+// writes __attribute__((__noinline__)).
+#if defined(_MSC_VER)
+#define CIP_COLD_FN static __device__ __declspec(noinline)
+#else
 #define CIP_COLD_FN static __device__ __attribute__((noinline))
+#endif
 #define CIP_GPTR(T) T *
 #define CIP_CPTR(T) const T *
 #define CIP_HITCTR u32 *
@@ -75,7 +79,12 @@ typedef uint64_t u64;
 #define CIP_GPTR(T) T *
 #define CIP_CPTR(T) const T *
 #define CIP_HITCTR u32 *
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define CIP_ATOMIC_INC(p) ((u32)_InterlockedExchangeAdd((volatile long *)(p), 1))
+#else
 #define CIP_ATOMIC_INC(p) __atomic_fetch_add((p), 1u, __ATOMIC_RELAXED)
+#endif
 
 #elif defined(CIP_TARGET_GLSL)
 

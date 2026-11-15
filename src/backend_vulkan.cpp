@@ -3,12 +3,38 @@
 //
 // The kernel is the shared source compiled to SPIR-V at build time (kernel/entry_vulkan.comp),
 // one module per scratch mode.
+//
+// On Windows the Vulkan loader (vulkan-1.dll) is installed by the GPU driver, so a machine
+// may have none, and a program that imports it would then not start at all. There the
+// loader is opened at run time instead (CIP_VULKAN_DYNAMIC; the other systems can be built
+// that way too, which is how this path gets tested).
+#if !defined(CIP_VULKAN_DYNAMIC)
+#if defined(_WIN32)
+#define CIP_VULKAN_DYNAMIC 1
+#else
+#define CIP_VULKAN_DYNAMIC 0
+#endif
+#endif
+
+#if CIP_VULKAN_DYNAMIC
+#define VK_NO_PROTOTYPES
+#endif
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+
+#if CIP_VULKAN_DYNAMIC
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+#endif
 
 #include "backend.h"
 
@@ -18,6 +44,73 @@
 #include "kernel_vk.inc"  // kernel_vk_{0,1,2}_spv[] and their _len, indexed by CIP_SCRATCH_*
 
 namespace {
+
+#if CIP_VULKAN_DYNAMIC
+
+// Every Vulkan function this file calls.
+#define CIP_VK_FUNCTIONS(X) \
+    X(vkAllocateCommandBuffers) X(vkAllocateDescriptorSets) X(vkAllocateMemory)                    \
+    X(vkBeginCommandBuffer) X(vkBindBufferMemory) X(vkCmdBindDescriptorSets)                       \
+    X(vkCmdBindPipeline) X(vkCmdCopyBuffer) X(vkCmdDispatch) X(vkCmdPushConstants)                 \
+    X(vkCreateBuffer) X(vkCreateCommandPool) X(vkCreateComputePipelines)                           \
+    X(vkCreateDescriptorPool) X(vkCreateDescriptorSetLayout) X(vkCreateDevice) X(vkCreateFence)    \
+    X(vkCreateInstance) X(vkCreatePipelineLayout) X(vkCreateShaderModule) X(vkDestroyBuffer)       \
+    X(vkDestroyCommandPool) X(vkDestroyDescriptorPool) X(vkDestroyDescriptorSetLayout)             \
+    X(vkDestroyDevice) X(vkDestroyFence) X(vkDestroyInstance) X(vkDestroyPipeline)                 \
+    X(vkDestroyPipelineLayout) X(vkDestroyShaderModule) X(vkDeviceWaitIdle)                        \
+    X(vkEndCommandBuffer) X(vkEnumerateDeviceExtensionProperties)                                  \
+    X(vkEnumerateInstanceExtensionProperties) X(vkEnumeratePhysicalDevices) X(vkFreeMemory)        \
+    X(vkGetBufferMemoryRequirements) X(vkGetDeviceQueue) X(vkGetPhysicalDeviceFeatures)            \
+    X(vkGetPhysicalDeviceMemoryProperties) X(vkGetPhysicalDeviceProperties)                        \
+    X(vkGetPhysicalDeviceProperties2) X(vkGetPhysicalDeviceQueueFamilyProperties) X(vkMapMemory)   \
+    X(vkQueueSubmit) X(vkResetCommandBuffer) X(vkResetFences) X(vkUpdateDescriptorSets)            \
+    X(vkWaitForFences)
+
+#define X(name) PFN_##name name = nullptr;
+CIP_VK_FUNCTIONS(X)
+#undef X
+
+#if !defined(CIP_VULKAN_LIBRARY)
+#if defined(_WIN32)
+#define CIP_VULKAN_LIBRARY "vulkan-1.dll"
+#elif defined(__APPLE__)
+#define CIP_VULKAN_LIBRARY "libvulkan.1.dylib"
+#else
+#define CIP_VULKAN_LIBRARY "libvulkan.so.1"
+#endif
+#endif
+
+// Opens the loader and resolves the functions, once. Returns false with a message if
+// this machine has no (or too old a) Vulkan loader.
+bool load_vulkan(std::string &err)
+{
+    static bool tried = false;
+    static std::string failure;
+    if (!tried) {
+        tried = true;
+#if defined(_WIN32)
+        HMODULE lib = LoadLibraryA(CIP_VULKAN_LIBRARY);
+#define CIP_VK_SYMBOL(name) (void *)GetProcAddress(lib, name)
+#else
+        void *lib = dlopen(CIP_VULKAN_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+#define CIP_VK_SYMBOL(name) dlsym(lib, name)
+#endif
+        if (!lib) {
+            failure = "no Vulkan loader (" CIP_VULKAN_LIBRARY ") on this machine";
+        } else {
+#define X(name)                                                    \
+    name = reinterpret_cast<PFN_##name>(CIP_VK_SYMBOL(#name));     \
+    if (!name && failure.empty()) failure = "the Vulkan loader (" CIP_VULKAN_LIBRARY ") has no " #name;
+            CIP_VK_FUNCTIONS(X)
+#undef X
+        }
+#undef CIP_VK_SYMBOL
+    }
+    err = failure;
+    return failure.empty();
+}
+
+#endif  // CIP_VULKAN_DYNAMIC
 
 const uint32_t kLocalSize = 64;  // local_size_x in entry_vulkan.comp
 
@@ -498,6 +591,9 @@ private:
 std::vector<std::unique_ptr<Backend>> create_vulkan_backends(const std::vector<int> &devices, std::string &err)
 {
     std::vector<std::unique_ptr<Backend>> v;
+#if CIP_VULKAN_DYNAMIC
+    if (!load_vulkan(err)) return v;
+#endif
     try {
         uint32_t n = 0;
         check(vkEnumerateInstanceExtensionProperties(nullptr, &n, nullptr), "vkEnumerateInstanceExtensionProperties");

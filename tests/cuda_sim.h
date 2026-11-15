@@ -25,7 +25,12 @@ struct cuda_sim_dim {
 };
 inline thread_local cuda_sim_dim blockIdx, blockDim, threadIdx;
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+inline uint32_t atomicAdd(uint32_t *p, uint32_t v) { return (uint32_t)_InterlockedExchangeAdd((volatile long *)p, (long)v); }
+#else
 inline uint32_t atomicAdd(uint32_t *p, uint32_t v) { return __atomic_fetch_add(p, v, __ATOMIC_RELAXED); }
+#endif
 
 typedef int cudaError_t;
 const cudaError_t cudaSuccess = 0;

@@ -48,7 +48,7 @@ LINK     := $(CXX)
 
 KERNEL := src/kernel/defs.h src/kernel/field.h src/kernel/search.h
 HDRS   := $(wildcard src/*.h) $(KERNEL) $(BUILD)/config
-OBJS   := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o backend_cpu.o)
+OBJS   := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o platform.o backend_cpu.o)
 
 ifeq ($(METAL),1)
 DEFS   += -DCIP_HAVE_METAL
@@ -128,13 +128,13 @@ $(FIELD_SHIM): tests/field_shim.cpp $(KERNEL) | $(BUILD)
 
 # The CUDA backend compiled as ordinary C++ against a small stand-in for the CUDA runtime,
 # so its host logic and the kernel as CUDA sees it are exercised without a GPU or nvcc.
-SIM_OBJS := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o) $(BUILD)/sim_backend_cpu.o $(BUILD)/sim_backend_cuda.o
+SIM_OBJS := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o platform.o) $(BUILD)/sim_backend_cpu.o $(BUILD)/sim_backend_cuda.o
 
 $(BUILD)/sim_backend_cpu.o: src/backend_cpu.cpp $(HDRS) | $(BUILD)
 	$(CXX) $(ALLFLAGS) -UCIP_HAVE_METAL -UCIP_HAVE_VULKAN -UCIP_HAVE_ROCM -DCIP_HAVE_CUDA -c -o $@ $<
 
-$(BUILD)/sim_backend_cuda.o: src/backend_cuda.cu tests/cuda_sim.h $(HDRS) | $(BUILD)
-	$(CXX) $(ALLFLAGS) -DCIP_CUDA_SIM -DCIP_SCRATCH_AOS=$(CUDA_AOS) -include tests/cuda_sim.h -x c++ -c -o $@ $<
+$(BUILD)/sim_backend_cuda.o: tests/sim_backend_cuda.cpp src/backend_cuda.cu tests/cuda_sim.h $(HDRS) | $(BUILD)
+	$(CXX) $(ALLFLAGS) -DCIP_SCRATCH_AOS=$(CUDA_AOS) -c -o $@ $<
 
 $(BUILD)/cipollino-cudasim: $(SIM_OBJS)
 	$(CXX) -o $@ $(SIM_OBJS) $(SODIUM_LIBS) -lpthread

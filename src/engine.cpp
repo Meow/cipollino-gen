@@ -12,14 +12,12 @@
 #include <random>
 #include <stdexcept>
 #include <thread>
-#include <cerrno>
-#include <sys/stat.h>
 #include <tuple>
-#include <unistd.h>
 
 #include "ed.h"
 #include "keys.h"
 #include "onion.h"
+#include "platform.h"
 
 namespace {
 
@@ -435,15 +433,7 @@ private:
 
 bool check_outdir(const std::string &dir, std::string &err)
 {
-    if (mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) {
-        err = dir + ": " + strerror(errno);
-        return false;
-    }
-    if (access(dir.c_str(), W_OK | X_OK) != 0) {
-        err = dir + ": " + strerror(errno);
-        return false;
-    }
-    return true;
+    return plat::make_private_dir(dir, true, err) && plat::dir_writable(dir, err);
 }
 
 }  // namespace
@@ -455,7 +445,7 @@ int run_search(std::vector<std::unique_ptr<Backend>> &backends, const Options &o
     Shared sh(opt);
     sh.filter = build_filter(opt.prefixes);
     sh.p_match = match_probability(opt.prefixes);
-    sh.tty = isatty(STDERR_FILENO) != 0;
+    sh.tty = plat::stderr_is_terminal();
     const bool bench = opt.bench_seconds > 0;
 
     std::string err;
