@@ -73,6 +73,17 @@ make docker-rocm                     # AMD: cipollino:rocm and cipollino:rocm-de
 CIPOLLINO_IMAGE=cipollino:rocm ./cipollino-docker -n 2 someprefix
 ```
 
+Both images are also built by GitHub Actions (`.github/workflows/docker.yml`) and
+published to the GitHub Container Registry, so nothing has to be built locally:
+
+```
+CIPOLLINO_IMAGE=ghcr.io/meow/cipollino-gen      ./cipollino-docker -n 2 someprefix   # CUDA, Vulkan
+CIPOLLINO_IMAGE=ghcr.io/meow/cipollino-gen:rocm ./cipollino-docker -n 2 someprefix   # ROCm, Vulkan
+```
+
+`latest` and `rocm` follow the default branch; other branches publish `<branch>` and
+`<branch>-rocm`.
+
 `cipollino-docker` runs the image as you, with `./keys` mounted and every GPU it finds
 passed through: `--gpus all` when Docker has the NVIDIA runtime, `/dev/dri` (Vulkan on
 Mesa) and `/dev/kfd` (ROCm) when they exist. On an NVIDIA machine it amounts to
