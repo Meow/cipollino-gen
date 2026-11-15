@@ -155,12 +155,27 @@ typedef uint64_t u64;
 
 #define CIP_STATE_WORDS 20u  // per thread: x and y of its centre, 10 limbs each
 #define CIP_HIT_WORDS 3u
-#define CIP_BITMAP_BITS 24u
-#define CIP_BITMAP_WORDS (1u << (CIP_BITMAP_BITS - 5u))
-#define CIP_MAX_DIRECT 4u
 
+// The pre-filter on the first 32 bits of a key, by number of prefixes:
+//   DIRECT       up to CIP_FEW_DIRECT: mask-and-compare against launch parameters
+//   DIRECT_MANY  up to CIP_MAX_DIRECT: the same with all twelve slots, about 2% of a
+//                pair's instructions and still no memory access
+//   BITMAP       any number: bit tables, see below
+#define CIP_FEW_DIRECT 4u
+#define CIP_MAX_DIRECT 12u
 #define CIP_MODE_DIRECT 0u
 #define CIP_MODE_BITMAP 1u
+#define CIP_MODE_DIRECT_MANY 2u
+
+// Bitmap mode keeps three bit tables in one buffer. Every key is looked up in the near
+// table, on key bits 0-15: at 8 KiB it stays in the cache next to the cores, where a
+// table of megabytes costs a trip to memory per key. The keys that pass it (one in
+// 65536 per prefix) are looked up in the two far tables, on bits 0-23 and on bits 8-31.
+#define CIP_BITMAP_NEAR_BITS 16u
+#define CIP_BITMAP_FAR_BITS 24u
+#define CIP_BITMAP_FAR_A (1u << (CIP_BITMAP_NEAR_BITS - 5u))  // word offsets in the buffer
+#define CIP_BITMAP_FAR_B (CIP_BITMAP_FAR_A + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
+#define CIP_BITMAP_WORDS (CIP_BITMAP_FAR_B + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
 
 // Launch parameters. Plain u32s only so the layout is identical everywhere.
 struct cip_params {
@@ -172,6 +187,6 @@ struct cip_params {
     u32 hitcap;    // capacity of the hit buffer, in records
     u32 pad0;
     u32 pad1;
-    u32 dm[4];     // direct mode: low-32 masks (unused entries: mask 0 / value 1, never match)
-    u32 dv[4];     // direct mode: low-32 values
+    u32 dm[12];    // direct modes: low-32 masks (unused entries: mask 0 / value 1, never match)
+    u32 dv[12];    // direct modes: low-32 values
 };

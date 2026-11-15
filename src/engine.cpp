@@ -443,7 +443,7 @@ void request_stop() { g_stop = true; }
 int run_search(std::vector<std::unique_ptr<Backend>> &backends, const Options &opt)
 {
     Shared sh(opt);
-    sh.filter = build_filter(opt.prefixes);
+    sh.filter = build_filter(opt.prefixes, opt.filter_tables);
     sh.p_match = match_probability(opt.prefixes);
     sh.tty = plat::stderr_is_terminal();
     const bool bench = opt.bench_seconds > 0;
@@ -632,8 +632,15 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     lists.push_back(many);
     std::vector<std::string> wide;  // short prefixes exercise the bitmap expansion
     for (int i = 0; i < 5; i++) wide.push_back(random_prefix(1));
+    for (int i = 0; i < 8; i++) wide.push_back(random_prefix(2));
     wide.push_back(stolen(4));
     lists.push_back(wide);
+    // The direct mode with twelve slots: one more prefix than the four-slot mode takes,
+    // and a full house with real candidates in the first, the fifth and the last slot.
+    lists.push_back({random_prefix(3), random_prefix(3), random_prefix(3), random_prefix(3), stolen(6)});
+    std::vector<std::string> dozen;
+    for (int i = 0; i < 12; i++) dozen.push_back(i == 0 || i == 4 || i == 11 ? stolen(5 + i) : random_prefix(3));
+    lists.push_back(dozen);
 
     for (size_t li = 0; li < lists.size(); li++) {
         const std::vector<std::string> &prefixes = lists[li];
@@ -672,7 +679,7 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
         if (n != want.size() || got.size() != want.size() || !std::equal(got.begin(), got.end(), want.begin(), hit_equal)) {
             char buf[256];
             snprintf(buf, sizeof buf, "%s: prefix list %zu (%s mode): expected %zu hits, device reported %u%s\n", tag, li,
-                     f.mode == CIP_MODE_DIRECT ? "direct" : "bitmap", want.size(), n,
+                     f.mode == CIP_MODE_BITMAP ? "bitmap" : "direct", want.size(), n,
                      n == want.size() ? " but different ones" : "");
             log += buf;
             return false;

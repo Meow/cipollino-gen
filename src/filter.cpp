@@ -25,7 +25,29 @@ static void prefix_mask(const std::string &p, uint64_t &mask, uint64_t &value)
     }
 }
 
-Filter build_filter(const std::vector<std::string> &prefixes)
+Filter::Filter()
+{
+    static_assert(sizeof dm == sizeof(cip_params().dm) && sizeof dm / sizeof dm[0] == CIP_MAX_DIRECT, "direct slots");
+    for (uint32_t &m : dm) m = 0;
+    for (uint32_t &v : dv) v = 1;
+}
+
+// Sets, in the bit table of 2^bits bits at word `at`, every index that agrees with the
+// prefix (mask, value: its first 32 key bits) on key bits shift .. shift+bits-1.
+static void mark(std::vector<uint32_t> &bitmap, size_t at, uint32_t mask, uint32_t value, int shift, int bits)
+{
+    const uint32_t full = (1u << bits) - 1;
+    mask = (mask >> shift) & full;
+    value = (value >> shift) & full;
+    uint32_t freebits = ~mask & full, sub = 0;
+    do {
+        uint32_t idx = value | sub;
+        bitmap[at + (idx >> 5)] |= 1u << (idx & 31);
+        sub = (sub - freebits) & freebits;
+    } while (sub != 0);
+}
+
+Filter build_filter(const std::vector<std::string> &prefixes, bool tables)
 {
     Filter f;
     for (const std::string &p : prefixes) {
@@ -36,8 +58,8 @@ Filter build_filter(const std::vector<std::string> &prefixes)
         f.records.push_back((uint32_t)(mask >> 32));
         f.records.push_back((uint32_t)(value >> 32));
     }
-    if (prefixes.size() <= CIP_MAX_DIRECT) {
-        f.mode = CIP_MODE_DIRECT;
+    if (prefixes.size() <= CIP_MAX_DIRECT && !tables) {
+        f.mode = prefixes.size() <= CIP_FEW_DIRECT ? CIP_MODE_DIRECT : CIP_MODE_DIRECT_MANY;
         for (size_t i = 0; i < prefixes.size(); i++) {
             f.dm[i] = f.records[4 * i];
             f.dv[i] = f.records[4 * i + 1];
@@ -46,16 +68,11 @@ Filter build_filter(const std::vector<std::string> &prefixes)
     }
     f.mode = CIP_MODE_BITMAP;
     f.bitmap.assign(CIP_BITMAP_WORDS, 0);
-    const uint32_t full = (1u << CIP_BITMAP_BITS) - 1;
     for (size_t i = 0; i < prefixes.size(); i++) {
-        uint32_t mask = f.records[4 * i] & full, value = f.records[4 * i + 1] & full;
-        // Enumerate every index that agrees with the prefix on the masked bits.
-        uint32_t freebits = ~mask & full, sub = 0;
-        do {
-            uint32_t idx = value | sub;
-            f.bitmap[idx >> 5] |= 1u << (idx & 31);
-            sub = (sub - freebits) & freebits;
-        } while (sub != 0);
+        uint32_t mask = f.records[4 * i], value = f.records[4 * i + 1];
+        mark(f.bitmap, 0, mask, value, 0, CIP_BITMAP_NEAR_BITS);
+        mark(f.bitmap, CIP_BITMAP_FAR_A, mask, value, 0, CIP_BITMAP_FAR_BITS);
+        mark(f.bitmap, CIP_BITMAP_FAR_B, mask, value, 32 - CIP_BITMAP_FAR_BITS, CIP_BITMAP_FAR_BITS);
     }
     return f;
 }

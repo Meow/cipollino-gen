@@ -150,6 +150,7 @@ cipollino [options] PREFIX [PREFIX...]
       --threads T     kernel threads per device
       --pairs N       pairs per batch; a batch tests 2N+1 keys per thread
       --scratch MODE  auto, full, lean or half (see Tuning)
+      --filter MODE   auto or bitmap (see Tuning)
       --launch-ms MS  target duration of one kernel launch
       --bench [SECS]  measure throughput, write nothing
       --tune          try thread counts and scratch modes, print the fastest as flags
@@ -173,8 +174,10 @@ Every extra character multiplies the work by 32:
 | 11 | 3.6e16 | 9 months | 25 days |
 | 12 | 1.2e18 | 24 years | 2.2 years |
 
-Searching for several prefixes costs nothing extra per key, so the time to the *first*
-hit divides by the number of (equally long) prefixes.
+Searching for several prefixes at once divides the time to the *first* hit by the number
+of (equally long) prefixes, as long as the rate holds. On the M5 Pro it does, up to
+thousands of prefixes. How the rate on an RTX 4090 depends on the number of prefixes has
+not been measured since the filter was reworked (see Tuning).
 
 ## Speed
 
@@ -281,9 +284,12 @@ That comes to 8 multiplications, one squaring and two 32-bit probes per pair in 
 default `lean` mode: about 4.6 multiplication-equivalents per key (a squaring costs 0.57
 of a multiplication on the M5, a probe 0.35), plus 1-2% for the batch inversion.
 
-Multiple prefixes: up to four are compared directly against the 32 bits; more than four
-go through a 2 MiB bitmap indexed by the first 24 bits of the key. Survivors are
-compared against all prefixes on 64 bits on the GPU and then in full on the CPU.
+Multiple prefixes: up to four are compared directly against the 32 bits, five to twelve
+the same way with all twelve slots of the launch parameters. Longer lists go through bit
+tables: every key is looked up in an 8 KiB table on its first 16 bits, small enough to
+stay in the cache next to the cores, and the one key in 65536 per prefix that passes is
+looked up in two 2 MiB tables that cover all 32 bits. Survivors are compared against all
+prefixes on 64 bits on the GPU and then in full on the CPU.
 
 The kernel (`src/kernel/`) is written in the common subset of CUDA/HIP C++, the Metal
 Shading Language, Vulkan GLSL and plain C++ (a handful of macros cover casts, buffers
@@ -349,6 +355,13 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
   the GPU idle.
 - `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024);
   memory is `threads * pairs * 32` bytes in `lean` mode.
+- `--filter bitmap` sends even a short prefix list through the bit tables instead of the
+  direct comparison, to compare the two with `--bench`. The direct comparison costs
+  about 70 simple instructions per key pair with twelve slots and touches no memory; a
+  table costs a memory access per key. An earlier version looked every key up in a 2 MiB
+  table as soon as there were more than four prefixes, and ran at two thirds of its
+  usual rate on an RTX 4090 that way; on the M5 Pro neither that nor the present filter
+  costs anything measurable (5 000 prefixes: 1.6 G keys/s, was 1.16).
 - The scratch layout is a build option per backend (`CUDA_AOS`, `ROCM_AOS`, `VULKAN_AOS`,
   1 = each thread's slot contiguous, 0 = one word per thread side by side). CUDA and
   Metal use 1, which is 10% faster on the 4090 in `lean` mode; for Vulkan and for ROCm

@@ -17,6 +17,7 @@ struct Options {
     int scratch = -1;                   // CIP_SCRATCH_* to force a scratch mode; -1 = backend's choice
     double launch_seconds = 0;          // 0 = backend default
     double bench_seconds = 0;           // > 0: measure throughput for this long, write nothing
+    bool filter_tables = false;         // bitmap pre-filter even for few prefixes (see filter.h)
     bool quiet = false;
 };
 
