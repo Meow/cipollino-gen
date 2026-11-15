@@ -34,6 +34,9 @@ static void usage(FILE *out)
         "      --scratch MODE  auto (default: measure at start-up), full, lean or half: trade\n"
         "                      device memory traffic (64/32/16 bytes per key pair) against\n"
         "                      a little arithmetic\n"
+        "      --filter MODE   auto (default) or bitmap. Up to 12 prefixes are compared with\n"
+        "                      each key directly; longer lists, or all with `bitmap`, go\n"
+        "                      through bit tables in device memory\n"
         "      --launch-ms MS  target duration of one kernel launch\n"
         "      --bench [SECS]  measure throughput for SECS seconds (default 10), write nothing\n"
         "      --tune          try thread counts and scratch modes, print the fastest as flags\n"
@@ -134,6 +137,13 @@ int main(int argc, char **argv)
             opt.scratch = m == "full" ? 2 : m == "lean" ? 1 : m == "half" ? 0 : -1;
             if (opt.scratch < 0 && m != "auto") {
                 fprintf(stderr, "error: --scratch wants auto, full, lean or half\n");
+                return 2;
+            }
+        } else if (a == "--filter") {
+            std::string m = text();
+            opt.filter_tables = m == "bitmap";
+            if (!opt.filter_tables && m != "auto") {
+                fprintf(stderr, "error: --filter wants auto or bitmap\n");
                 return 2;
             }
         } else if (a == "--launch-ms") {

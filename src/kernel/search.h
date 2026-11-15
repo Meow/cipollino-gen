@@ -114,7 +114,7 @@ CIP_FN fe8 cip_scratch_fetch(u32 slot, u32 tid, u32 T CIP_BUFS_DECL)
 #define CIP_TAKE(dst, buf, cur, next) dst = cip_scratch_fetch(cur, tid, T CIP_BUFS)
 #endif
 
-// Rare path: a candidate passed the 32-bit / bitmap pre-filter. Confirm against the full
+// Rare path: a candidate passed the pre-filter on its first 32 bits. Confirm against the full
 // 64-bit filter records and append a hit. The host re-derives and re-checks everything.
 CIP_COLD_FN void cip_confirm(fe y, u32 lo, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
@@ -132,6 +132,10 @@ CIP_COLD_FN void cip_confirm(fe y, u32 lo, u32 tid, u32 batch, u32 code, cip_par
     }
 }
 
+// Top bit set unless direct-mode entry j accepts `lo`.
+#define CIP_DIRECT_MISS(j) cip_nonzero((lo & prm.dm[j]) ^ prm.dv[j])
+CIP_FN u32 cip_nonzero(u32 x) { return x | (0u - x); }
+
 // Pre-filter on the first 32 bits of a key (as a little-endian word): can it match any prefix?
 CIP_FN bool cip_prefilter(u32 lo, cip_params prm CIP_BUFS_DECL)
 {
@@ -139,20 +143,41 @@ CIP_FN bool cip_prefilter(u32 lo, cip_params prm CIP_BUFS_DECL)
         return ((lo & prm.dm[0]) == prm.dv[0]) || ((lo & prm.dm[1]) == prm.dv[1])
             || ((lo & prm.dm[2]) == prm.dv[2]) || ((lo & prm.dm[3]) == prm.dv[3]);
     }
-    u32 idx = lo & ((1u << CIP_BITMAP_BITS) - 1u);
+    if (prm.mode == CIP_MODE_DIRECT_MANY) {
+        // Twelve entries, folded without a branch per entry.
+        u32 miss = CIP_DIRECT_MISS(0) & CIP_DIRECT_MISS(1) & CIP_DIRECT_MISS(2) & CIP_DIRECT_MISS(3)
+                 & CIP_DIRECT_MISS(4) & CIP_DIRECT_MISS(5) & CIP_DIRECT_MISS(6) & CIP_DIRECT_MISS(7)
+                 & CIP_DIRECT_MISS(8) & CIP_DIRECT_MISS(9) & CIP_DIRECT_MISS(10) & CIP_DIRECT_MISS(11);
+        return (miss >> 31) == 0u;
+    }
+    u32 idx = lo & ((1u << CIP_BITMAP_NEAR_BITS) - 1u);
     return ((bitmap[idx >> 5] >> (idx & 31u)) & 1u) != 0u;
+}
+
+// Second stage of the bitmap pre-filter, for the few keys that pass the first: the far
+// tables. The other modes have no second stage.
+CIP_FN bool cip_prefilter_far(u32 lo, cip_params prm CIP_BUFS_DECL)
+{
+    if (prm.mode != CIP_MODE_BITMAP) return true;
+    u32 a = lo & ((1u << CIP_BITMAP_FAR_BITS) - 1u);
+    u32 b = lo >> (32u - CIP_BITMAP_FAR_BITS);
+    return ((bitmap[CIP_BITMAP_FAR_A + (a >> 5)] >> (a & 31u)) & (bitmap[CIP_BITMAP_FAR_B + (b >> 5)] >> (b & 31u)) & 1u) != 0u;
 }
 
 // Test a candidate whose y coordinate is known in full.
 CIP_COLD_FN void cip_check(fe y, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
     u32 lo = fe_low32(y);
-    if (cip_prefilter(lo, prm CIP_BUFS)) cip_confirm(y, lo, tid, batch, code, prm CIP_BUFS);
+    if (cip_prefilter(lo, prm CIP_BUFS) && cip_prefilter_far(lo, prm CIP_BUFS))
+        cip_confirm(y, lo, tid, batch, code, prm CIP_BUFS);
 }
 
-// Slow path of cip_check_product: form the whole product.
-CIP_COLD_FN void cip_check_exact(fe f, fe g, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
+// Slow path of cip_check_product: the probe's low word `lo` passed the pre-filter, or is
+// not certain (`unsure`). A certain one is first put through the second stage; what is
+// left has the whole product formed.
+CIP_COLD_FN void cip_check_exact(fe f, fe g, u32 lo, u32 unsure, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
+    if (unsure == 0u && !cip_prefilter_far(lo, prm CIP_BUFS)) return;
     cip_check(fe_mul(f, g), tid, batch, code, prm CIP_BUFS);
 }
 
@@ -162,7 +187,7 @@ CIP_FN void cip_check_product(fe f, fe g, u32 tid, u32 batch, u32 code, cip_para
 {
     fe_probe pr = fe_mul_probe(f, g);
     if (cip_prefilter(pr.lo, prm CIP_BUFS) || pr.unsure != 0u)
-        cip_check_exact(f, g, tid, batch, code, prm CIP_BUFS);
+        cip_check_exact(f, g, pr.lo, pr.unsure, tid, batch, code, prm CIP_BUFS);
 }
 
 // Finish pair i (table entry at q) given t = c*k_i and inv = 1/(1 - t^2): 3 multiplications
