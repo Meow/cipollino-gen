@@ -2,8 +2,9 @@
 
 GPU vanity address generator for Tor v3 onion services.
 
-- **CUDA** on NVIDIA GPUs (all of them in the machine by default), **Metal** on Apple
-  GPUs, and a multithreaded CPU fallback. All three run the same kernel source.
+- **CUDA** on NVIDIA GPUs, **ROCm** on AMD GPUs, **Metal** on Apple GPUs, **Vulkan** on
+  anything with a Vulkan driver (NVIDIA, AMD, Intel, Apple), and a multithreaded CPU
+  fallback. All of them run the same kernel source, on every GPU in the machine.
 - Any number of prefixes at once; stops after `-n` keys.
 - Keys are generated from the OS CSPRNG, the GPU never sees secret material, and every
   key is re-derived and validated on the CPU with libsodium before it is written.
@@ -26,15 +27,23 @@ cipollya765v….onion/hs_ed25519_secret_key      (mode 0600, directory 0700)
 
 ## Building
 
-Needs a C++17 compiler, make, libsodium (>= 1.0.18) and Python 3 for the tests.
+Needs a C++17 compiler, make, libsodium (>= 1.0.18) and Python 3 for the tests. `make`
+builds every backend whose toolchain it finds:
+
+| backend | needs at build time | at run time |
+|---|---|---|
+| CUDA | `nvcc` on PATH | NVIDIA driver, CUDA runtime |
+| ROCm | `hipcc` (on PATH or in `/opt/rocm/bin`) | ROCm runtime, `/dev/kfd` |
+| Metal | macOS | - |
+| Vulkan | Vulkan headers, `glslangValidator`, `xxd` | Vulkan loader and a driver with 64-bit shader integers |
 
 ```
-# Linux + NVIDIA: nvcc on PATH selects the CUDA backend
-sudo apt install build-essential libsodium-dev
+# Debian/Ubuntu (add the CUDA toolkit or ROCm for those backends)
+sudo apt install build-essential libsodium-dev libvulkan-dev glslang-tools xxd
 make
 
-# macOS: Metal backend
-brew install libsodium
+# macOS: Metal, plus Vulkan through MoltenVK if these are installed
+brew install libsodium vulkan-headers vulkan-loader molten-vk glslang
 make
 ```
 
@@ -42,35 +51,46 @@ make
 
 The CUDA build targets the GPU in the build machine (`-arch=native`). If your nvcc is
 too old to know that flag, name the generation instead, e.g. `make CUDA_ARCH=sm_75`.
+The ROCm build takes its targets from `ROCM_ARCH`, e.g. `make ROCM_ARCH=gfx11-generic`.
 Windows is not supported (use WSL 2).
 
-### Docker (NVIDIA)
+### Docker
 
-The host needs only the NVIDIA driver, Docker and nvidia-container-toolkit; no CUDA
-toolkit, compiler or libsodium.
+The host needs only its GPU driver and Docker (plus nvidia-container-toolkit for
+NVIDIA); no SDK, compiler or libsodium. Two images:
+
+| image | backends | build | size |
+|---|---|---|---|
+| `cipollino` | CUDA, Vulkan (NVIDIA; AMD and Intel through Mesa) | `make docker` | 590 MB |
+| `cipollino:rocm` | ROCm, Vulkan (Mesa) | `make docker-rocm` | 3.1 GB |
 
 ```
-make docker                          # builds cipollino (255 MB) and cipollino:dev
+make docker                          # builds cipollino and cipollino:dev
 make docker-test                     # GPU self-test and end-to-end tests in the container
 ./cipollino-docker -n 2 someprefix   # keys land in ./keys, owned by you
+
+make docker-rocm                     # AMD: cipollino:rocm and cipollino:rocm-dev
+CIPOLLINO_IMAGE=cipollino:rocm ./cipollino-docker -n 2 someprefix
 ```
 
-`cipollino-docker` is a thin wrapper around
+`cipollino-docker` runs the image as you, with `./keys` mounted and every GPU it finds
+passed through: `--gpus all` when Docker has the NVIDIA runtime, `/dev/dri` (Vulkan on
+Mesa) and `/dev/kfd` (ROCm) when they exist. On an NVIDIA machine it amounts to
 
 ```
 docker run --rm --init --gpus all --user "$(id -u):$(id -g)" -v "$PWD/keys:/keys:z" cipollino ARGS
 ```
 
-and takes `CIPOLLINO_KEYS` (output directory), `CIPOLLINO_GPUS` (docker's `--gpus`
+It takes `CIPOLLINO_KEYS` (output directory), `CIPOLLINO_GPUS` (docker's `--gpus`
 value) and `CIPOLLINO_IMAGE`. A prefix file for `-f` must be visible inside the
 container: put it in the keys directory and pass `/keys/<name>`.
 
 The container refuses to start a search whose output directory is not mounted from
 outside, because a key written to the container's own filesystem disappears with it.
 
-The image is built with `-arch=all-major`, so it carries machine code for every GPU
-generation its nvcc knows. `cipollino:dev` keeps the toolchain and sources (`/src`) for
-rebuilding with other flags.
+The CUDA code is built with `-arch=all-major` and the ROCm code for the generic target
+of every GPU family, so the images are not tied to the build machine's GPU. The `:dev`
+images keep the toolchain and sources (`/src`) for rebuilding with other flags.
 
 ## Usage
 
@@ -80,8 +100,9 @@ cipollino [options] PREFIX [PREFIX...]
   -n, --count N       stop after N keys (default 1; 0 = run until interrupted)
   -d, --dir DIR       where to create the <address>.onion directories (default .)
   -f, --file FILE     read more prefixes from FILE, one per line
-  -b, --backend NAME  auto (default), cuda, metal or cpu
-      --devices LIST  CUDA devices to use, e.g. 0,2 (default: all)
+  -b, --backend NAME  auto (default), cuda, rocm, metal, vulkan or cpu
+      --devices LIST  devices to use, numbered as the backend lists them, e.g. 0,2
+                      (default: all GPUs)
       --threads T     kernel threads per device
       --pairs N       pairs per batch; a batch tests 2N+1 keys per thread
       --scratch MODE  auto, full, lean or half (see Tuning)
@@ -117,14 +138,33 @@ Measured with `cipollino --bench`:
 
 | device | backend | keys/s |
 |---|---|---|
-| NVIDIA RTX 4090 (in Docker, 60 s run) | CUDA | 15.5 G |
-| Apple M5 Pro, first ~20 s | Metal | 1.7 G |
+| NVIDIA RTX 4090 | CUDA | 15.5 G |
+| NVIDIA RTX 4090 (also driving a desktop) | Vulkan | 14.6 - 15.3 G |
+| Apple M5 Pro, first ~20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, sustained (laptop in "Automatic" power mode, heat-soaked) | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU fallback | 150 M |
+| AMD Radeon 610M (the 2-CU iGPU of a Ryzen 9 7950X) | ROCm 6.4 | 100 M |
+| AMD Radeon 610M | Vulkan (RADV) | 53 M |
+
+The 4090 and the Radeon were measured in the Docker images. With `auto`, a native API is
+preferred over Vulkan (CUDA, ROCm, Metal, then Vulkan); they are never mixed, as that
+would drive one GPU twice.
 
 On the 4090 the search runs at the card's 450 W power limit with the memory controller
 28% busy (`half` scratch mode), so it is bound by arithmetic, not by memory. An
-8-character prefix took 99 s (1.5e12 keys) in a real run.
+8-character prefix took 99 s (1.5e12 keys) in a real run. No discrete AMD or any Intel
+GPU has been tried; the Radeon 610M's results also jump between about 60 and 105 M
+keys/s depending on thread count and scratch mode in a way I have not explained.
+
+**Use CUDA, not Vulkan, on an NVIDIA GPU that also runs a desktop.** The kernels are
+equally fast (Vulkan reaches 16 G keys/s in short runs), but NVIDIA's driver cannot
+cheaply preempt a running Vulkan compute dispatch: whenever the compositor wants to
+draw, the dispatch in flight continues at about 1/17 of its speed until it ends, and one
+that then needs more than several seconds gets the device reset (kernel log: `Xid 109,
+CTX SWITCH TIMEOUT`). With 250 ms launches that meant 4.4 s stalls every ten seconds or
+so, with 500 ms launches a lost device. The Vulkan backend therefore keeps launches on
+NVIDIA to 50 ms, which bounds a stall to under a second; `--launch-ms` overrides that at
+your own risk.
 
 ## How it works
 
@@ -174,8 +214,10 @@ Multiple prefixes: up to four are compared directly against the 32 bits; more th
 go through a 2 MiB bitmap indexed by the first 24 bits of the key. Survivors are
 compared against all prefixes on 64 bits on the GPU and then in full on the CPU.
 
-The kernel (`src/kernel/`) is written in the common subset of CUDA C++, the Metal
-Shading Language and plain C++, so one source is compiled three ways.
+The kernel (`src/kernel/`) is written in the common subset of CUDA/HIP C++, the Metal
+Shading Language, Vulkan GLSL and plain C++ (a handful of macros cover casts, buffers
+and inlining), so one source is compiled by nvcc, hipcc, the Metal compiler,
+glslang and the host compiler.
 
 ## Security
 
@@ -230,13 +272,16 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
   the three are measured at start-up; the fastest is used, or the one needing least
   memory among those within 2% of it. On an RTX 4090 `full` saturates the memory bus
   (11.7 G keys/s) while `lean` and `half` reach 15.5-16 G. On Apple GPUs `lean` wins.
-- `--threads`: CUDA defaults to 1024 per multiprocessor (131072 on a 4090), Metal to
-  65536. More threads cost memory; too few leave the GPU idle.
+- `--threads`: CUDA and ROCm default to 1024 per multiprocessor as the runtime counts
+  them (131072 on a 4090), Metal to 65536. Vulkan cannot ask a device how wide it is and uses 131072
+  for discrete GPUs, 16384 for integrated ones. More threads cost memory; too few leave
+  the GPU idle.
 - `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024);
   memory is `threads * pairs * 32` bytes in `lean` mode.
 - `make CUDA_AOS=1` switches the CUDA scratch layout from one-word-per-warp-access to
   one-slot-per-thread. On Apple GPUs that layout is clearly better; on an RTX 4090 the
   two are within noise in `half` mode and the default is 8% faster in `lean`.
+  `make ROCM_AOS=1` is the same switch for ROCm (no difference on the Radeon 610M).
 
 On a laptop the GPU is thermally limited within a minute; macOS's High Power mode, where
 available, raises the sustained rate.
@@ -245,12 +290,13 @@ available, raises the sustained rate.
 
 ```
 make test          # everything this machine can run
-make docker-test   # the GPU part inside the container (NVIDIA)
+make docker-test        # the GPU part inside the container: CUDA and Vulkan
+make docker-rocm-test   # ROCm and Vulkan in the ROCm container
 ```
 
 - `tests/test_field.py`: field arithmetic against Python big integers, including the
   worst-case limb values of every operand class and the documented output bounds.
-- `--selftest` on the CPU, Metal and (when present) CUDA backends, and on the CUDA
+- `--selftest` on the CPU backend and every GPU backend in the build, and on the CUDA
   backend compiled against `tests/cuda_sim.h`.
 - `tests/test_cli.py`: end-to-end runs, re-verified in Python.
 
@@ -260,11 +306,12 @@ make docker-test   # the GPU part inside the container (NVIDIA)
 src/kernel/defs.h      target abstraction (CUDA / Metal / CPU)
 src/kernel/field.h     GF(2^255-19)
 src/kernel/search.h    the per-thread search loop
-src/backend_*.{cu,mm,cpp}
+src/kernel/entry_*     per-API kernel entry points (Metal, Vulkan)
+src/backend_*.{cu,mm,cpp}   one per API; backend_cuda.cu is also the ROCm backend
 src/engine.cpp         seeding, launches, hit validation, self-tests
 src/keys.cpp           all secret-key handling (libsodium)
 src/ed.cpp             public-point helpers and the kernel table
 src/filter.cpp         prefixes -> GPU filter tables
 src/onion.cpp          SHA3-256, address encoding
-Dockerfile, docker/, cipollino-docker    container build, entry-point guard, run wrapper
+Dockerfile, Dockerfile.rocm, docker/, cipollino-docker    container builds, entry-point guard, run wrapper
 ```

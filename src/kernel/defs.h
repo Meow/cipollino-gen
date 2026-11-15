@@ -1,12 +1,19 @@
 // cipollino kernel: target abstraction.
 //
-// The kernel sources (defs.h, field.h, search.h) are written in the subset of C++ that
-// CUDA C++, the Metal Shading Language and ordinary host C++ all accept, so the exact
-// same arithmetic runs on every backend and can be unit-tested on the CPU.
+// The kernel sources (defs.h, field.h, search.h) are written in the common subset of
+// CUDA/HIP C++, the Metal Shading Language, Vulkan GLSL and ordinary host C++, so the
+// exact same arithmetic runs on every backend and can be unit-tested on the CPU.
 //
-// Rules for that subset: no references or pointers to thread-local data (MSL wants an
-// address space on every pointer), field elements are passed and returned by value,
-// no integer literal suffixes wider than `u`, no recursion, no globals.
+// Rules for that subset:
+//   - field elements are passed and returned by value; no references, no pointers to
+//     thread-local data (MSL wants an address space on every pointer, GLSL has none);
+//   - conversions are written CIP_U32(x) / CIP_U64(x), never as C casts (GLSL only has
+//     constructor syntax);
+//   - device buffers are reached only through the names state, table, scratch, hits,
+//     filt, bitmap and CIP_HIT_NEXT(). On the C-like targets those are pointers handed
+//     down the call chain by CIP_BUFS_DECL / CIP_BUFS; in GLSL they are globals;
+//   - booleans combine with || and &&, integer literals carry a `u`, no recursion, no
+//     typedefs, no identifiers that GLSL reserves (step, half, filter, input, ...).
 //
 // Functions are CIP_FN (always inlined: everything executed per key pair) or CIP_COLD_FN
 // (code that runs once per batch or on rare paths). The distinction only matters to nvcc,
@@ -14,7 +21,7 @@
 // the other compilers are free to inline cold functions too.
 //
 // The including file selects the target by defining exactly one of
-// CIP_TARGET_METAL / CIP_TARGET_CUDA / CIP_TARGET_CPU.
+// CIP_TARGET_METAL / CIP_TARGET_CUDA (also used for HIP) / CIP_TARGET_GLSL / CIP_TARGET_CPU.
 
 #if defined(CIP_TARGET_METAL)
 
@@ -55,8 +62,42 @@ typedef uint64_t u64;
 #define CIP_HITCTR u32 *
 #define CIP_ATOMIC_INC(p) __atomic_fetch_add((p), 1u, __ATOMIC_RELAXED)
 
+#elif defined(CIP_TARGET_GLSL)
+
+// The including shader declares the buffers as globals and CIP_SMODE as a macro.
+#define u32 uint
+#define u64 uint64_t
+#define CIP_FN
+#define CIP_COLD_FN
+#define CIP_U32(x) uint(x)
+#define CIP_U64(x) uint64_t(x)
+#define CIP_BUFS_DECL
+#define CIP_BUFS
+#define CIP_HIT_NEXT() atomicAdd(hitctr, 1u)
+#define CIP_SMODE_TEMPLATE
+#define SMODE CIP_SMODE
+
 #else
-#error "define CIP_TARGET_METAL, CIP_TARGET_CUDA or CIP_TARGET_CPU before including the kernel"
+#error define a CIP_TARGET_ macro before including the kernel
+#endif
+
+#ifndef CIP_BUFS_DECL
+#define CIP_U32(x) ((u32)(x))
+#define CIP_U64(x) ((u64)(x))
+// Not every function touches every buffer.
+#if defined(CIP_TARGET_METAL)
+#define CIP_UNUSED
+#else
+#define CIP_UNUSED [[maybe_unused]]
+#endif
+#define CIP_BUFS_DECL                                                                          \
+    , CIP_UNUSED CIP_GPTR(u32) state, CIP_UNUSED CIP_CPTR(u32) table,                          \
+        CIP_UNUSED CIP_GPTR(u32) scratch, CIP_UNUSED CIP_HITCTR hitctr,                        \
+        CIP_UNUSED CIP_GPTR(u32) hits, CIP_UNUSED CIP_CPTR(u32) filt,                          \
+        CIP_UNUSED CIP_CPTR(u32) bitmap
+#define CIP_BUFS , state, table, scratch, hitctr, hits, filt, bitmap
+#define CIP_HIT_NEXT() CIP_ATOMIC_INC(hitctr)
+#define CIP_SMODE_TEMPLATE template <int SMODE>
 #endif
 
 // ---- layout constants shared by the host and the kernel -----------------------------

@@ -21,7 +21,7 @@ struct fe {
 
 #define CIP_M26 0x3ffffffu
 #define CIP_M25 0x1ffffffu
-#define CIP_MUL(a, b) ((u64)(a) * (u64)(b))
+#define CIP_MUL(a, b) (CIP_U64(a) * CIP_U64(b))
 
 CIP_FN fe fe_one()
 {
@@ -42,24 +42,24 @@ CIP_FN fe fe_reduce(u64 h0, u64 h1, u64 h2, u64 h3, u64 h4, u64 h5, u64 h6, u64 
 {
     fe r;
     u64 q = (h9 + (h8 >> 26)) >> 25;
-    h0 += q * (u64)19u;
-    h1 += h0 >> 26; r.v[0] = (u32)h0 & CIP_M26;
-    h2 += h1 >> 25; r.v[1] = (u32)h1 & CIP_M25;
-    h3 += h2 >> 26; r.v[2] = (u32)h2 & CIP_M26;
-    h4 += h3 >> 25; r.v[3] = (u32)h3 & CIP_M25;
-    h5 += h4 >> 26; r.v[4] = (u32)h4 & CIP_M26;
-    h6 += h5 >> 25; r.v[5] = (u32)h5 & CIP_M25;
-    h7 += h6 >> 26; r.v[6] = (u32)h6 & CIP_M26;
-    h8 += h7 >> 25; r.v[7] = (u32)h7 & CIP_M25;
-    h9 += h8 >> 26; r.v[8] = (u32)h8 & CIP_M26;
-    r.v[9] = (u32)(h9 - (q << 25));
+    h0 += q * CIP_U64(19u);
+    h1 += h0 >> 26; r.v[0] = CIP_U32(h0) & CIP_M26;
+    h2 += h1 >> 25; r.v[1] = CIP_U32(h1) & CIP_M25;
+    h3 += h2 >> 26; r.v[2] = CIP_U32(h2) & CIP_M26;
+    h4 += h3 >> 25; r.v[3] = CIP_U32(h3) & CIP_M25;
+    h5 += h4 >> 26; r.v[4] = CIP_U32(h4) & CIP_M26;
+    h6 += h5 >> 25; r.v[5] = CIP_U32(h5) & CIP_M25;
+    h7 += h6 >> 26; r.v[6] = CIP_U32(h6) & CIP_M26;
+    h8 += h7 >> 25; r.v[7] = CIP_U32(h7) & CIP_M25;
+    h9 += h8 >> 26; r.v[8] = CIP_U32(h8) & CIP_M26;
+    r.v[9] = CIP_U32(h9 - (q << 25));
     return r;
 }
 
 CIP_FN fe fe_carry(fe a)
 {
-    return fe_reduce((u64)a.v[0], (u64)a.v[1], (u64)a.v[2], (u64)a.v[3], (u64)a.v[4],
-                     (u64)a.v[5], (u64)a.v[6], (u64)a.v[7], (u64)a.v[8], (u64)a.v[9]);
+    return fe_reduce(CIP_U64(a.v[0]), CIP_U64(a.v[1]), CIP_U64(a.v[2]), CIP_U64(a.v[3]), CIP_U64(a.v[4]),
+                     CIP_U64(a.v[5]), CIP_U64(a.v[6]), CIP_U64(a.v[7]), CIP_U64(a.v[8]), CIP_U64(a.v[9]));
 }
 
 CIP_FN fe fe_add(fe a, fe b)
@@ -254,8 +254,8 @@ CIP_FN u32 fe_low32(fe a)
 
 CIP_FN u32 fe_high32(fe a)
 {
-    u64 lo = (u64)a.v[0] + ((u64)a.v[1] << 26) + ((u64)a.v[2] << 51) + (u64)(19u * (a.v[9] >> 25));
-    return (u32)(lo >> 32);
+    u64 lo = CIP_U64(a.v[0]) + (CIP_U64(a.v[1]) << 26) + (CIP_U64(a.v[2]) << 51) + CIP_U64(19u * (a.v[9] >> 25));
+    return CIP_U32(lo >> 32);
 }
 
 // The low 32 bits of the canonical value of f*g, for a fraction of the cost of fe_mul.
@@ -294,7 +294,7 @@ CIP_FN fe_probe fe_mul_probe(fe f, fe g)
            + CIP_MUL(f5, g4) + CIP_MUL(f6, g3) + CIP_MUL(f7, g2) + CIP_MUL(f8, g1) + CIP_MUL(f9, g0);
     u64 n = h9 + (h8 >> 26);
     fe_probe r;
-    r.lo = l0 + (l1 << 26) + 19u * (u32)(n >> 25);
-    r.unsure = (((u32)n & CIP_M25) >= CIP_M25 - 8192u) ? 1u : 0u;
+    r.lo = l0 + (l1 << 26) + 19u * CIP_U32(n >> 25);
+    r.unsure = ((CIP_U32(n) & CIP_M25) >= CIP_M25 - 8192u) ? 1u : 0u;
     return r;
 }

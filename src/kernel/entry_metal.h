@@ -13,5 +13,5 @@ kernel void cipollino_search(device u32 *state [[buffer(0)]],
                              uint tid [[thread_position_in_grid]])
 {
     if (tid >= prm.nthreads) return;
-    cip_search_thread<CIP_SMODE>(tid, state, table, scratch, hitctr, hits, filt, bitmap, prm);
+    cip_search_thread<CIP_SMODE>(tid, prm CIP_BUFS);
 }

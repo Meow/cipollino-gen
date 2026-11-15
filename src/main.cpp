@@ -25,8 +25,9 @@ static void usage(FILE *out)
         "  -n, --count N       stop after N keys (default 1; 0 = run until interrupted)\n"
         "  -d, --dir DIR       where to create the <address>.onion directories (default .)\n"
         "  -f, --file FILE     read more prefixes from FILE, one per line\n"
-        "  -b, --backend NAME  auto (default), cuda, metal or cpu\n"
-        "      --devices LIST  CUDA devices to use, e.g. 0,2 (default: all)\n"
+        "  -b, --backend NAME  auto (default), cuda, rocm, metal, vulkan or cpu\n"
+        "      --devices LIST  devices to use, numbered as the backend lists them, e.g. 0,2\n"
+        "                      (default: all GPUs)\n"
         "      --threads T     kernel threads per device (default: per device)\n"
         "      --pairs N       pairs per batch; a batch tests 2N+1 keys per thread\n"
         "                      (default: as large as the device's memory comfortably allows)\n"
@@ -189,18 +190,38 @@ int main(int argc, char **argv)
     }
 
     std::vector<std::unique_ptr<Backend>> backends;
-    std::string err, cuda_err, metal_err;
-    if (backend == "auto" || backend == "cuda") backends = create_cuda_backends(devices, cuda_err);
-    if (backends.empty() && (backend == "auto" || backend == "metal")) backends = create_metal_backends(metal_err);
-    if (backends.empty() && backend == "auto") {
-        fprintf(stderr, "note: no GPU backend available (cuda: %s; metal: %s); falling back to the CPU, which is slow.\n",
-                cuda_err.c_str(), metal_err.c_str());
+    // Native APIs first, then Vulkan (which reaches every vendor), then the CPU. With
+    // "auto" the first backend that finds a device wins; devices are not mixed across
+    // backends, as one GPU would then be driven twice.
+    struct Choice {
+        const char *name;
+        std::vector<std::unique_ptr<Backend>> (*create)(const std::vector<int> &, std::string &);
+    };
+    static const Choice choices[] = {
+        {"cuda", create_cuda_backends},
+        {"rocm", create_rocm_backends},
+        {"metal", [](const std::vector<int> &, std::string &e) { return create_metal_backends(e); }},
+        {"vulkan", create_vulkan_backends},
+    };
+    std::string why;
+    bool known = backend == "auto" || backend == "cpu";
+    for (const Choice &c : choices) {
+        if (backend == c.name) known = true;
+        if (!backends.empty() || (backend != "auto" && backend != c.name)) continue;
+        std::string e;
+        backends = c.create(devices, e);
+        if (backends.empty()) why += std::string(why.empty() ? "" : "; ") + c.name + ": " + e;
     }
+    if (!known) {
+        fprintf(stderr, "error: unknown backend '%s' (auto, cuda, rocm, metal, vulkan, cpu)\n", backend.c_str());
+        return 2;
+    }
+    if (backends.empty() && backend == "auto")
+        fprintf(stderr, "note: no GPU backend available (%s); falling back to the CPU, which is slow.\n", why.c_str());
     if (backends.empty() && (backend == "auto" || backend == "cpu"))
         backends = create_cpu_backends(std::thread::hardware_concurrency());
     if (backends.empty()) {
-        err = backend == "cuda" ? cuda_err : backend == "metal" ? metal_err : "unknown backend '" + backend + "'";
-        fprintf(stderr, "error: %s\n", err.c_str());
+        fprintf(stderr, "error: %s\n", why.c_str());
         return 1;
     }
 

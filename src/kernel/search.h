@@ -28,8 +28,7 @@
 //                                                     warp covers one contiguous 128 bytes
 //                                 (s*T + t)*8 + w     CIP_SCRATCH_AOS=1: a thread's slot is
 //                                                     contiguous
-//                               Which is faster is a property of the GPU's memory system:
-//                               Apple GPUs pay almost 4x more for the first layout.
+//                               Which is faster is a property of the GPU's memory system.
 //   hitctr  [1]                 atomic count of hits this launch
 //   hits    [3 * hitcap]        (thread, batch, code); code 0 = centre, else 2*i + sign
 //                               with sign 0 for C + Q_i and 1 for C - Q_i
@@ -37,69 +36,79 @@
 //                               first 8 public key bytes read as a little-endian u64
 //   bitmap  [2^19]              bitmap mode: one bit per value of the first 3 key bytes
 
-CIP_FN fe cip_load10(CIP_CPTR(u32) p)
+CIP_FN fe cip_table_load(u32 at CIP_BUFS_DECL)
 {
     fe r;
-    r.v[0] = p[0]; r.v[1] = p[1]; r.v[2] = p[2]; r.v[3] = p[3]; r.v[4] = p[4];
-    r.v[5] = p[5]; r.v[6] = p[6]; r.v[7] = p[7]; r.v[8] = p[8]; r.v[9] = p[9];
+    r.v[0] = table[at]; r.v[1] = table[at + 1u]; r.v[2] = table[at + 2u]; r.v[3] = table[at + 3u];
+    r.v[4] = table[at + 4u]; r.v[5] = table[at + 5u]; r.v[6] = table[at + 6u]; r.v[7] = table[at + 7u];
+    r.v[8] = table[at + 8u]; r.v[9] = table[at + 9u];
     return r;
 }
 
-CIP_FN void cip_store10(CIP_GPTR(u32) p, fe a)
+CIP_FN fe cip_state_load(u32 at CIP_BUFS_DECL)
 {
-    p[0] = a.v[0]; p[1] = a.v[1]; p[2] = a.v[2]; p[3] = a.v[3]; p[4] = a.v[4];
-    p[5] = a.v[5]; p[6] = a.v[6]; p[7] = a.v[7]; p[8] = a.v[8]; p[9] = a.v[9];
+    fe r;
+    r.v[0] = state[at]; r.v[1] = state[at + 1u]; r.v[2] = state[at + 2u]; r.v[3] = state[at + 3u];
+    r.v[4] = state[at + 4u]; r.v[5] = state[at + 5u]; r.v[6] = state[at + 6u]; r.v[7] = state[at + 7u];
+    r.v[8] = state[at + 8u]; r.v[9] = state[at + 9u];
+    return r;
+}
+
+CIP_FN void cip_state_store(u32 at, fe a CIP_BUFS_DECL)
+{
+    state[at] = a.v[0]; state[at + 1u] = a.v[1]; state[at + 2u] = a.v[2]; state[at + 3u] = a.v[3];
+    state[at + 4u] = a.v[4]; state[at + 5u] = a.v[5]; state[at + 6u] = a.v[6]; state[at + 7u] = a.v[7];
+    state[at + 8u] = a.v[8]; state[at + 9u] = a.v[9];
 }
 
 #if CIP_SCRATCH_AOS
 #define CIP_SCRATCH_AT(slot, tid, T) (((slot) * (T) + (tid)) * 8u)
-#define CIP_SCRATCH_STEP(T) 1u
+#define CIP_SCRATCH_STRIDE(T) 1u
 #else
 #define CIP_SCRATCH_AT(slot, tid, T) ((slot) * 8u * (T) + (tid))
-#define CIP_SCRATCH_STEP(T) (T)
+#define CIP_SCRATCH_STRIDE(T) (T)
 #endif
 
 // Scratch slot `slot` of thread `tid`; `a` must be tight.
-CIP_FN void cip_scratch_store(CIP_GPTR(u32) s, u32 slot, u32 tid, u32 T, fe a)
+CIP_FN void cip_scratch_store(u32 slot, u32 tid, u32 T, fe a CIP_BUFS_DECL)
 {
     fe8 p = fe_pack(a);
     u32 at = CIP_SCRATCH_AT(slot, tid, T);
-    u32 step = CIP_SCRATCH_STEP(T);
-    s[at] = p.w[0];
-    s[at + step] = p.w[1];
-    s[at + 2u * step] = p.w[2];
-    s[at + 3u * step] = p.w[3];
-    s[at + 4u * step] = p.w[4];
-    s[at + 5u * step] = p.w[5];
-    s[at + 6u * step] = p.w[6];
-    s[at + 7u * step] = p.w[7];
+    u32 stride = CIP_SCRATCH_STRIDE(T);
+    scratch[at] = p.w[0];
+    scratch[at + stride] = p.w[1];
+    scratch[at + 2u * stride] = p.w[2];
+    scratch[at + 3u * stride] = p.w[3];
+    scratch[at + 4u * stride] = p.w[4];
+    scratch[at + 5u * stride] = p.w[5];
+    scratch[at + 6u * stride] = p.w[6];
+    scratch[at + 7u * stride] = p.w[7];
 }
 
-CIP_FN fe cip_scratch_load(CIP_CPTR(u32) s, u32 slot, u32 tid, u32 T)
+CIP_FN fe cip_scratch_load(u32 slot, u32 tid, u32 T CIP_BUFS_DECL)
 {
     fe8 p;
     u32 at = CIP_SCRATCH_AT(slot, tid, T);
-    u32 step = CIP_SCRATCH_STEP(T);
-    p.w[0] = s[at];
-    p.w[1] = s[at + step];
-    p.w[2] = s[at + 2u * step];
-    p.w[3] = s[at + 3u * step];
-    p.w[4] = s[at + 4u * step];
-    p.w[5] = s[at + 5u * step];
-    p.w[6] = s[at + 6u * step];
-    p.w[7] = s[at + 7u * step];
+    u32 stride = CIP_SCRATCH_STRIDE(T);
+    p.w[0] = scratch[at];
+    p.w[1] = scratch[at + stride];
+    p.w[2] = scratch[at + 2u * stride];
+    p.w[3] = scratch[at + 3u * stride];
+    p.w[4] = scratch[at + 4u * stride];
+    p.w[5] = scratch[at + 5u * stride];
+    p.w[6] = scratch[at + 6u * stride];
+    p.w[7] = scratch[at + 7u * stride];
     return fe_unpack(p);
 }
 
 // Rare path: a candidate passed the 32-bit / bitmap pre-filter. Confirm against the full
 // 64-bit filter records and append a hit. The host re-derives and re-checks everything.
-CIP_COLD_FN void cip_confirm(fe y, u32 lo, u32 tid, u32 batch, u32 code,
-                             CIP_HITCTR hitctr, CIP_GPTR(u32) hits, CIP_CPTR(u32) filt, cip_params prm)
+CIP_COLD_FN void cip_confirm(fe y, u32 lo, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
     u32 hi = fe_high32(y);
     for (u32 j = 0u; j < prm.nfilt; j++) {
         if ((lo & filt[4u * j]) == filt[4u * j + 1u] && (hi & filt[4u * j + 2u]) == filt[4u * j + 3u]) {
-            u32 slot = CIP_ATOMIC_INC(hitctr);
+            u32 slot = CIP_HIT_NEXT();
             if (slot < prm.hitcap) {
                 hits[3u * slot] = tid;
                 hits[3u * slot + 1u] = batch;
@@ -111,91 +120,81 @@ CIP_COLD_FN void cip_confirm(fe y, u32 lo, u32 tid, u32 batch, u32 code,
 }
 
 // Pre-filter on the first 32 bits of a key (as a little-endian word): can it match any prefix?
-CIP_FN bool cip_prefilter(u32 lo, CIP_CPTR(u32) bitmap, cip_params prm)
+CIP_FN bool cip_prefilter(u32 lo, cip_params prm CIP_BUFS_DECL)
 {
     if (prm.mode == CIP_MODE_DIRECT) {
-        return ((lo & prm.dm[0]) == prm.dv[0]) | ((lo & prm.dm[1]) == prm.dv[1])
-             | ((lo & prm.dm[2]) == prm.dv[2]) | ((lo & prm.dm[3]) == prm.dv[3]);
+        return ((lo & prm.dm[0]) == prm.dv[0]) || ((lo & prm.dm[1]) == prm.dv[1])
+            || ((lo & prm.dm[2]) == prm.dv[2]) || ((lo & prm.dm[3]) == prm.dv[3]);
     }
     u32 idx = lo & ((1u << CIP_BITMAP_BITS) - 1u);
     return ((bitmap[idx >> 5] >> (idx & 31u)) & 1u) != 0u;
 }
 
 // Test a candidate whose y coordinate is known in full.
-CIP_COLD_FN void cip_check(fe y, u32 tid, u32 batch, u32 code,
-                           CIP_HITCTR hitctr, CIP_GPTR(u32) hits, CIP_CPTR(u32) filt,
-                           CIP_CPTR(u32) bitmap, cip_params prm)
+CIP_COLD_FN void cip_check(fe y, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
     u32 lo = fe_low32(y);
-    if (cip_prefilter(lo, bitmap, prm)) cip_confirm(y, lo, tid, batch, code, hitctr, hits, filt, prm);
+    if (cip_prefilter(lo, prm CIP_BUFS)) cip_confirm(y, lo, tid, batch, code, prm CIP_BUFS);
 }
 
 // Slow path of cip_check_product: form the whole product.
-CIP_COLD_FN void cip_check_exact(fe f, fe g, u32 tid, u32 batch, u32 code,
-                                 CIP_HITCTR hitctr, CIP_GPTR(u32) hits, CIP_CPTR(u32) filt,
-                                 CIP_CPTR(u32) bitmap, cip_params prm)
+CIP_COLD_FN void cip_check_exact(fe f, fe g, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
-    cip_check(fe_mul(f, g), tid, batch, code, hitctr, hits, filt, bitmap, prm);
+    cip_check(fe_mul(f, g), tid, batch, code, prm CIP_BUFS);
 }
 
 // Test the candidate y = f*g. Almost always only its low 32 bits are computed; the full
 // product is formed in the rare cases where those pass the pre-filter or are not certain.
-CIP_FN void cip_check_product(fe f, fe g, u32 tid, u32 batch, u32 code,
-                              CIP_HITCTR hitctr, CIP_GPTR(u32) hits, CIP_CPTR(u32) filt,
-                              CIP_CPTR(u32) bitmap, cip_params prm)
+CIP_FN void cip_check_product(fe f, fe g, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
 {
     fe_probe pr = fe_mul_probe(f, g);
-    if (cip_prefilter(pr.lo, bitmap, prm) | (pr.unsure != 0u))
-        cip_check_exact(f, g, tid, batch, code, hitctr, hits, filt, bitmap, prm);
+    if (cip_prefilter(pr.lo, prm CIP_BUFS) || pr.unsure != 0u)
+        cip_check_exact(f, g, tid, batch, code, prm CIP_BUFS);
 }
 
-// Finish pair i (table entry q) given t = c*k_i and inv = 1/(1 - t^2): 3 multiplications
+// Finish pair i (table entry at q) given t = c*k_i and inv = 1/(1 - t^2): 3 multiplications
 // and two probes.
-CIP_FN void cip_pair(u32 i, fe t, fe inv, fe x1, fe y1, CIP_CPTR(u32) q, u32 tid, u32 batch,
-                     CIP_HITCTR hitctr, CIP_GPTR(u32) hits, CIP_CPTR(u32) filt,
-                     CIP_CPTR(u32) bitmap, cip_params prm)
+CIP_FN void cip_pair(u32 i, fe t, fe inv, fe x1, fe y1, u32 q, u32 tid, u32 batch, cip_params prm CIP_BUFS_DECL)
 {
     fe w = fe_mul(t, inv);
-    fe A = fe_mul(cip_load10(q + 10u), y1);
-    fe B = fe_mul(cip_load10(q + 20u), x1);
+    fe A = fe_mul(cip_table_load(q + 10u CIP_BUFS), y1);
+    fe B = fe_mul(cip_table_load(q + 20u CIP_BUFS), x1);
     u32 code = 2u * (i + 1u);
-    cip_check_product(fe_add(A, B), fe_add(inv, w), tid, batch, code, hitctr, hits, filt, bitmap, prm);
-    cip_check_product(fe_sub(A, B), fe_sub(inv, w), tid, batch, code + 1u, hitctr, hits, filt, bitmap, prm);
+    cip_check_product(fe_add(A, B), fe_add(inv, w), tid, batch, code, prm CIP_BUFS);
+    cip_check_product(fe_sub(A, B), fe_sub(inv, w), tid, batch, code + 1u, prm CIP_BUFS);
 }
 
-// SMODE is one of CIP_SCRATCH_*.
-template <int SMODE>
-CIP_FN void cip_search_thread(u32 tid, CIP_GPTR(u32) state, CIP_CPTR(u32) table,
-                              CIP_GPTR(u32) scratch, CIP_HITCTR hitctr, CIP_GPTR(u32) hits,
-                              CIP_CPTR(u32) filt, CIP_CPTR(u32) bitmap, cip_params prm)
+// The work of thread `tid` for one launch. SMODE is one of CIP_SCRATCH_*: a template
+// argument on the C++ targets, a macro in GLSL.
+CIP_SMODE_TEMPLATE
+CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
 {
     const u32 T = prm.nthreads;
     const u32 N = prm.npairs;
-    const u32 smode = (u32)SMODE;
-    CIP_CPTR(u32) tab_kappa = table;
-    CIP_CPTR(u32) tab_pt = table + 10u * N;
-    CIP_CPTR(u32) tab_step = table + 40u * N;
+    const u32 smode = CIP_U32(SMODE);
+    const u32 tab_pt = 10u * N;    // (k_i, y_i, x_i); kappa_i starts at 0
+    const u32 tab_step = 40u * N;  // the step point
 
-    fe x1 = cip_load10(state + tid * CIP_STATE_WORDS);
-    fe y1 = cip_load10(state + tid * CIP_STATE_WORDS + 10u);
+    fe x1 = cip_state_load(tid * CIP_STATE_WORDS CIP_BUFS);
+    fe y1 = cip_state_load(tid * CIP_STATE_WORDS + 10u CIP_BUFS);
 
     for (u32 b = 0u; b < prm.nbatches; b++) {
-        cip_check(y1, tid, b, 0u, hitctr, hits, filt, bitmap, prm);
+        cip_check(y1, tid, b, 0u, prm CIP_BUFS);
 
         fe c = fe_mul_cold(x1, y1);
         fe z = fe_sq_cold(c);
 
         // Forward pass: running product of the denominators, the step's first.
-        fe p = fe_carry(fe_one_minus(fe_sq_cold(fe_mul_cold(c, cip_load10(tab_step)))));
+        fe p = fe_carry(fe_one_minus(fe_sq_cold(fe_mul_cold(c, cip_table_load(tab_step CIP_BUFS)))));
         for (u32 i = 0u; i < N; i++) {
-            fe e = fe_mul(cip_load10(tab_kappa + 10u * i), z);
+            fe e = fe_mul(cip_table_load(10u * i CIP_BUFS), z);
             if (smode == CIP_SCRATCH_FULL) {
-                cip_scratch_store(scratch, 2u * i, tid, T, p);
-                cip_scratch_store(scratch, 2u * i + 1u, tid, T, e);
+                cip_scratch_store(2u * i, tid, T, p CIP_BUFS);
+                cip_scratch_store(2u * i + 1u, tid, T, e CIP_BUFS);
             } else if (smode == CIP_SCRATCH_LEAN) {
-                cip_scratch_store(scratch, i, tid, T, p);
+                cip_scratch_store(i, tid, T, p CIP_BUFS);
             } else if ((i & 1u) == 0u) {
-                cip_scratch_store(scratch, i >> 1, tid, T, p);
+                cip_scratch_store(i >> 1, tid, T, p CIP_BUFS);
             }
             p = fe_mul(p, fe_one_minus(e));
         }
@@ -205,20 +204,20 @@ CIP_FN void cip_search_thread(u32 tid, CIP_GPTR(u32) state, CIP_CPTR(u32) table,
         // Backward pass: peel one inverse per pair and finish both of its candidates.
         if (smode == CIP_SCRATCH_FULL) {
             for (u32 i = N; i-- > 0u;) {
-                CIP_CPTR(u32) q = tab_pt + 30u * i;
-                fe t = fe_mul(cip_load10(q), c);
-                fe d = fe_one_minus(cip_scratch_load(scratch, 2u * i + 1u, tid, T));
-                fe inv = fe_mul(inv_all, cip_scratch_load(scratch, 2u * i, tid, T));
+                u32 q = tab_pt + 30u * i;
+                fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
+                fe d = fe_one_minus(cip_scratch_load(2u * i + 1u, tid, T CIP_BUFS));
+                fe inv = fe_mul(inv_all, cip_scratch_load(2u * i, tid, T CIP_BUFS));
                 inv_all = fe_mul(inv_all, d);
-                cip_pair(i, t, inv, x1, y1, q, tid, b, hitctr, hits, filt, bitmap, prm);
+                cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else if (smode == CIP_SCRATCH_LEAN) {
             for (u32 i = N; i-- > 0u;) {
-                CIP_CPTR(u32) q = tab_pt + 30u * i;
-                fe t = fe_mul(cip_load10(q), c);
-                fe inv = fe_mul(inv_all, cip_scratch_load(scratch, i, tid, T));
+                u32 q = tab_pt + 30u * i;
+                fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
+                fe inv = fe_mul(inv_all, cip_scratch_load(i, tid, T CIP_BUFS));
                 inv_all = fe_mul(inv_all, fe_one_minus(fe_sq(t)));
-                cip_pair(i, t, inv, x1, y1, q, tid, b, hitctr, hits, filt, bitmap, prm);
+                cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else {
             // Only the product before each even pair was stored (N is even in this mode).
@@ -228,14 +227,14 @@ CIP_FN void cip_search_thread(u32 tid, CIP_GPTR(u32) state, CIP_CPTR(u32) table,
             // matters to nvcc: two inlined pairs take it minutes to compile.
             fe t_even = fe_one(), d_even = fe_one(), stored = fe_one();
             for (u32 i = N; i-- > 0u;) {
-                CIP_CPTR(u32) q = tab_pt + 30u * i;
+                u32 q = tab_pt + 30u * i;
                 fe t, d, before;
                 if ((i & 1u) != 0u) {
-                    stored = cip_scratch_load(scratch, i >> 1, tid, T);
-                    t_even = fe_mul(cip_load10(q - 30u), c);
+                    stored = cip_scratch_load(i >> 1, tid, T CIP_BUFS);
+                    t_even = fe_mul(cip_table_load(q - 30u CIP_BUFS), c);
                     d_even = fe_one_minus(fe_sq(t_even));
                     before = fe_mul(stored, d_even);
-                    t = fe_mul(cip_load10(q), c);
+                    t = fe_mul(cip_table_load(q CIP_BUFS), c);
                     d = fe_one_minus(fe_sq(t));
                 } else {
                     t = t_even;
@@ -244,14 +243,14 @@ CIP_FN void cip_search_thread(u32 tid, CIP_GPTR(u32) state, CIP_CPTR(u32) table,
                 }
                 fe inv = fe_mul(inv_all, before);
                 inv_all = fe_mul(inv_all, d);
-                cip_pair(i, t, inv, x1, y1, q, tid, b, hitctr, hits, filt, bitmap, prm);
+                cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         }
 
         // inv_all is now 1/(1 - ts^2): move the centre by the step point (full x and y).
-        fe ts = fe_mul_cold(c, cip_load10(tab_step));
-        fe ys = cip_load10(tab_step + 10u);
-        fe xs = cip_load10(tab_step + 20u);
+        fe ts = fe_mul_cold(c, cip_table_load(tab_step CIP_BUFS));
+        fe ys = cip_table_load(tab_step + 10u CIP_BUFS);
+        fe xs = cip_table_load(tab_step + 20u CIP_BUFS);
         fe inv_m = fe_mul_cold(inv_all, fe_one_plus(ts));   // 1/(1 - ts)
         fe inv_p = fe_mul_cold(inv_all, fe_one_minus(ts));  // 1/(1 + ts)
         fe x3 = fe_mul_cold(fe_add(fe_mul_cold(x1, ys), fe_mul_cold(y1, xs)), inv_p);
@@ -260,6 +259,6 @@ CIP_FN void cip_search_thread(u32 tid, CIP_GPTR(u32) state, CIP_CPTR(u32) table,
         y1 = y3;
     }
 
-    cip_store10(state + tid * CIP_STATE_WORDS, x1);
-    cip_store10(state + tid * CIP_STATE_WORDS + 10u, y1);
+    cip_state_store(tid * CIP_STATE_WORDS, x1 CIP_BUFS);
+    cip_state_store(tid * CIP_STATE_WORDS + 10u, y1 CIP_BUFS);
 }

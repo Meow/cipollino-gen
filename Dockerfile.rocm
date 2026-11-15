@@ -1,0 +1,36 @@
+# cipollino for AMD GPUs: the ROCm backend, plus Vulkan (Mesa RADV) for comparison and for
+# GPUs ROCm does not support.
+#
+#   docker build -f Dockerfile.rocm -t cipollino:rocm .          (or: make docker-rocm)
+#   CIPOLLINO_IMAGE=cipollino:rocm ./cipollino-docker -n 2 someprefix
+#
+# The host needs only the amdgpu kernel driver (/dev/kfd and /dev/dri).
+# Targets: `runtime` (default) and `build` (toolchain and sources).
+
+ARG ROCM_VERSION=6.4.4
+
+FROM rocm/dev-ubuntu-24.04:${ROCM_VERSION} AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      g++ make pkg-config libsodium-dev python3 xxd \
+      libvulkan-dev glslang-tools libvulkan1 mesa-vulkan-drivers \
+ && rm -rf /var/lib/apt/lists/*
+
+# One code object per GPU family; the generic targets run on every model of a family.
+ARG ROCM_ARCH="gfx9-generic gfx9-4-generic gfx10-1-generic gfx10-3-generic gfx11-generic gfx12-generic"
+WORKDIR /src
+COPY Makefile ./
+COPY src src
+COPY tests tests
+RUN make -j"$(nproc)" ROCM_ARCH="$ROCM_ARCH" \
+ && make test-host ROCM_ARCH="$ROCM_ARCH"
+
+FROM rocm/dev-ubuntu-24.04:${ROCM_VERSION} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libsodium23 libvulkan1 mesa-vulkan-drivers \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/cipollino /usr/local/bin/cipollino
+COPY docker/entrypoint.sh /usr/local/bin/cipollino-entrypoint
+WORKDIR /keys
+ENTRYPOINT ["cipollino-entrypoint"]
+CMD ["--help"]

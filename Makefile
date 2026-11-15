@@ -1,28 +1,44 @@
 # cipollino build.
 #
-#   make            CUDA backend if nvcc is on PATH, Metal backend on macOS, CPU fallback always
+#   make            every backend this machine can build: CUDA (nvcc on PATH), ROCm (hipcc),
+#                   Metal (macOS), Vulkan (Vulkan headers + glslangValidator); CPU always
 #   make test       unit tests + exhaustive self-test of every backend that can run here
-#   make CUDA=0     force a build without CUDA        make METAL=0   ... without Metal
+#   make CUDA=0 ROCM=0 METAL=0 VULKAN=0     leave a backend out
 #   make CUDA_ARCH=sm_86   target a specific GPU generation instead of the one in this
 #                   machine (needed if your nvcc is too old to know -arch=native)
 #   make CUDA_AOS=1 CUDA build with the array-of-structs scratch layout (see kernel/search.h);
 #                   compare both with `cipollino --bench` if you want the last few percent
+#   make ROCM_ARCH="gfx1100 gfx1030"   AMD GPU architectures to generate code for
+#   make ROCM_AOS=1 the same layout switch for the ROCm build
 
 CXX      ?= c++
 CXXFLAGS ?= -O2
 NVCC     ?= nvcc
 CUDA_AOS ?= 0
 CUDA_ARCH ?= native
+ROCM_PATH ?= /opt/rocm
+HIPCC    ?= $(firstword $(shell command -v hipcc 2>/dev/null) $(wildcard $(ROCM_PATH)/bin/hipcc))
+ROCM_ARCH ?=
+ROCM_AOS ?= 0
+GLSLANG  ?= glslangValidator
 BUILD    := build
 
 UNAME := $(shell uname -s)
-CUDA  ?= $(if $(shell command -v $(NVCC) 2>/dev/null),1,0)
-METAL ?= $(if $(filter Darwin,$(UNAME)),1,0)
 
-# libsodium: pkg-config if present, otherwise Homebrew's prefix, otherwise the default paths.
-SODIUM_PREFIX := $(shell brew --prefix libsodium 2>/dev/null)
+# Homebrew keeps each package in its own prefix; elsewhere pkg-config or the default paths do.
+BREW := $(shell brew --prefix libsodium vulkan-headers vulkan-loader 2>/dev/null)
+SODIUM_PREFIX := $(word 1,$(BREW))
 SODIUM_CFLAGS := $(shell pkg-config --cflags libsodium 2>/dev/null || { [ -n "$(SODIUM_PREFIX)" ] && echo -I$(SODIUM_PREFIX)/include; })
 SODIUM_LIBS   := $(shell pkg-config --libs libsodium 2>/dev/null || { [ -n "$(SODIUM_PREFIX)" ] && echo -L$(SODIUM_PREFIX)/lib -lsodium; } || echo -lsodium)
+VULKAN_INC    := $(firstword $(wildcard $(word 2,$(BREW))/include /usr/include /usr/local/include))
+VULKAN_CFLAGS := $(shell pkg-config --cflags vulkan 2>/dev/null || { [ -f "$(word 2,$(BREW))/include/vulkan/vulkan.h" ] && echo -I$(word 2,$(BREW))/include; })
+VULKAN_LIBS   := $(shell pkg-config --libs vulkan 2>/dev/null || { [ -d "$(word 3,$(BREW))/lib" ] && echo -L$(word 3,$(BREW))/lib -lvulkan; } || echo -lvulkan)
+VULKAN_HEADER := $(shell echo '\#include <vulkan/vulkan.h>' | $(CXX) $(VULKAN_CFLAGS) -E -x c++ - >/dev/null 2>&1 && echo yes)
+
+CUDA   ?= $(if $(shell command -v $(NVCC) 2>/dev/null),1,0)
+ROCM   ?= $(if $(HIPCC),1,0)
+METAL  ?= $(if $(filter Darwin,$(UNAME)),1,0)
+VULKAN ?= $(if $(and $(VULKAN_HEADER),$(shell command -v $(GLSLANG) 2>/dev/null)),1,0)
 
 DEFS     :=
 ALLFLAGS = -std=c++17 -Wall -Wextra $(CXXFLAGS) -Isrc -I$(BUILD) $(SODIUM_CFLAGS) $(DEFS)
@@ -37,6 +53,19 @@ ifeq ($(METAL),1)
 DEFS   += -DCIP_HAVE_METAL
 OBJS   += $(BUILD)/backend_metal.o
 LDLIBS += -framework Metal -framework Foundation
+endif
+
+ifeq ($(VULKAN),1)
+DEFS   += -DCIP_HAVE_VULKAN
+OBJS   += $(BUILD)/backend_vulkan.o
+LDLIBS += $(VULKAN_LIBS)
+endif
+
+ifeq ($(ROCM),1)
+DEFS     += -DCIP_HAVE_ROCM
+OBJS     += $(BUILD)/backend_rocm.o
+HIPFLAGS ?= -O3 $(addprefix --offload-arch=,$(ROCM_ARCH))
+LDLIBS   += -L$(ROCM_PATH)/lib -lamdhip64 -Wl,-rpath,$(ROCM_PATH)/lib
 endif
 
 ifeq ($(CUDA),1)
@@ -62,15 +91,30 @@ $(BUILD)/kernel_metal.inc: $(KERNEL) src/kernel/entry_metal.h | $(BUILD)
 $(BUILD)/backend_metal.o: src/backend_metal.mm $(HDRS) $(BUILD)/kernel_metal.inc | $(BUILD)
 	$(CXX) $(ALLFLAGS) -fobjc-arc -c -o $@ $<
 
+# The Vulkan kernel is compiled to SPIR-V here, one module per scratch mode, and embedded.
+$(BUILD)/kernel_vk_%.spv: src/kernel/entry_vulkan.comp $(KERNEL) | $(BUILD)
+	$(GLSLANG) -V --target-env vulkan1.1 -DCIP_SMODE=$* -Isrc/kernel -o $@ $<
+
+$(BUILD)/kernel_vk.inc: $(BUILD)/kernel_vk_0.spv $(BUILD)/kernel_vk_1.spv $(BUILD)/kernel_vk_2.spv
+	cd $(BUILD) && { xxd -i kernel_vk_0.spv; xxd -i kernel_vk_1.spv; xxd -i kernel_vk_2.spv; } > kernel_vk.inc
+
+$(BUILD)/backend_vulkan.o: src/backend_vulkan.cpp $(HDRS) $(BUILD)/kernel_vk.inc | $(BUILD)
+	$(CXX) $(ALLFLAGS) $(VULKAN_CFLAGS) -c -o $@ $<
+
+# CUDA and ROCm share one source file: HIP is CUDA's API under other names.
 $(BUILD)/backend_cuda.o: src/backend_cuda.cu $(HDRS) | $(BUILD)
 	$(NVCC) $(NVCCFLAGS) -std=c++17 -Isrc $(DEFS) -DCIP_SCRATCH_AOS=$(CUDA_AOS) -c -o $@ $<
+
+$(BUILD)/backend_rocm.o: src/backend_cuda.cu src/hip_as_cuda.h $(HDRS) | $(BUILD)
+	$(HIPCC) $(HIPFLAGS) -std=c++17 -fPIE -Wno-pass-failed -Isrc $(DEFS) -DCIP_ROCM -DCIP_SCRATCH_AOS=$(ROCM_AOS) -x hip -c -o $@ $<
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
 # Rebuild everything when the configuration (flags, backends) changes.
+CONFIG = $(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS)/$(NVCCFLAGS) rocm=$(ROCM)/$(ROCM_AOS)/$(HIPFLAGS) metal=$(METAL) vulkan=$(VULKAN)
 $(BUILD)/config: FORCE | $(BUILD)
-	@echo '$(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS) metal=$(METAL)' | cmp -s - $@ || echo '$(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS) metal=$(METAL)' > $@
+	@echo '$(CONFIG)' | cmp -s - $@ || echo '$(CONFIG)' > $@
 
 FORCE:
 
@@ -86,7 +130,7 @@ $(FIELD_SHIM): tests/field_shim.cpp $(KERNEL) | $(BUILD)
 SIM_OBJS := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o) $(BUILD)/sim_backend_cpu.o $(BUILD)/sim_backend_cuda.o
 
 $(BUILD)/sim_backend_cpu.o: src/backend_cpu.cpp $(HDRS) | $(BUILD)
-	$(CXX) $(ALLFLAGS) -DCIP_HAVE_CUDA -UCIP_HAVE_METAL -c -o $@ $<
+	$(CXX) $(ALLFLAGS) -UCIP_HAVE_METAL -UCIP_HAVE_VULKAN -UCIP_HAVE_ROCM -DCIP_HAVE_CUDA -c -o $@ $<
 
 $(BUILD)/sim_backend_cuda.o: src/backend_cuda.cu tests/cuda_sim.h $(HDRS) | $(BUILD)
 	$(CXX) $(ALLFLAGS) -DCIP_CUDA_SIM -include tests/cuda_sim.h -x c++ -c -o $@ $<
@@ -114,6 +158,14 @@ ifeq ($(CUDA),1)
 	./cipollino --backend cuda --selftest
 	python3 tests/test_cli.py ./cipollino cuda
 endif
+ifeq ($(ROCM),1)
+	./cipollino --backend rocm --selftest
+	python3 tests/test_cli.py ./cipollino rocm
+endif
+ifeq ($(VULKAN),1)
+	./cipollino --backend vulkan --selftest
+	python3 tests/test_cli.py ./cipollino vulkan
+endif
 
 # ---- docker (NVIDIA) --------------------------------------------------------------------
 # `make docker` builds the runtime image (running the host tests on the way) and the :dev
@@ -126,9 +178,17 @@ docker:
 	docker build --target build -t $(DOCKER_IMAGE):dev .
 
 docker-test: docker
-	docker run --rm --gpus all $(DOCKER_IMAGE):dev make test-gpu
+	docker run --rm --gpus all --device /dev/dri $(DOCKER_IMAGE):dev make test-gpu
+
+# The same for AMD GPUs through ROCm (Dockerfile.rocm).
+docker-rocm:
+	docker build -f Dockerfile.rocm --target runtime -t $(DOCKER_IMAGE):rocm .
+	docker build -f Dockerfile.rocm --target build -t $(DOCKER_IMAGE):rocm-dev .
+
+docker-rocm-test: docker-rocm
+	docker run --rm --device /dev/kfd --device /dev/dri $(DOCKER_IMAGE):rocm-dev make test-gpu
 
 clean:
 	rm -rf $(BUILD) cipollino
 
-.PHONY: all test test-host test-gpu docker docker-test clean FORCE
+.PHONY: all test test-host test-gpu docker docker-test docker-rocm docker-rocm-test clean FORCE

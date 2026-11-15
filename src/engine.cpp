@@ -182,10 +182,16 @@ double measure(Backend &be, uint32_t nthreads, uint32_t npairs, uint32_t smode, 
     double t0 = now();
     be.launch(1, hits);
     double one = std::max(now() - t0, 1e-6);
-    uint32_t nb = (uint32_t)std::min(std::max(seconds / one, 1.0), 4096.0);
+    // Launches no longer than the backend likes them (some drivers punish long ones),
+    // as many as it takes to fill the measuring time.
+    uint32_t nb = (uint32_t)std::min(std::max(be.suggested_launch_seconds() / one, 1.0), 4096.0);
+    uint64_t batches = 0;
     t0 = now();
-    be.launch(nb, hits);
-    return (double)nthreads * (2.0 * npairs + 1) * nb / std::max(now() - t0, 1e-9);
+    do {
+        be.launch(nb, hits);
+        batches += nb;
+    } while (now() - t0 < seconds);
+    return (double)nthreads * (2.0 * npairs + 1) * (double)batches / std::max(now() - t0, 1e-9);
 }
 
 struct Shared {
@@ -381,7 +387,7 @@ private:
             burned_list.clear();
 
             double ideal = nb * target / std::max(dt, 1e-6);
-            nb = (uint32_t)std::min(std::max(std::min(ideal, nb * 4.0), 1.0), 16384.0);
+            nb = (uint32_t)std::lround(std::min(std::max(std::min(ideal, nb * 4.0), 1.0), 16384.0));
         }
         std::lock_guard<std::mutex> lock(sh_.out_mu);
         sh_.launch_rate += (double)per_batch * (double)batches_run / std::max(busy, 1e-9);

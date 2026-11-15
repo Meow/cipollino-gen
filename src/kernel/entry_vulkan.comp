@@ -1,0 +1,31 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_GOOGLE_include_directive : require
+
+// Vulkan compute entry point. Compiled to SPIR-V at build time, once per scratch mode
+// (-DCIP_SMODE=n); the host backend embeds the three modules.
+
+#define CIP_TARGET_GLSL
+#include "defs.h"
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) buffer cip_b0 { uint state[]; };
+layout(std430, set = 0, binding = 1) readonly buffer cip_b1 { uint table[]; };
+layout(std430, set = 0, binding = 2) buffer cip_b2 { uint scratch[]; };
+layout(std430, set = 0, binding = 3) buffer cip_b3 { uint hitctr; };
+layout(std430, set = 0, binding = 4) buffer cip_b4 { uint hits[]; };
+layout(std430, set = 0, binding = 5) readonly buffer cip_b5 { uint filt[]; };
+layout(std430, set = 0, binding = 6) readonly buffer cip_b6 { uint bitmap[]; };
+layout(push_constant) uniform cip_pc { cip_params launch; };
+
+#include "field.h"
+#include "search.h"
+
+void main()
+{
+    uint tid = gl_GlobalInvocationID.x;
+    cip_params prm = launch;
+    if (tid >= prm.nthreads) return;
+    cip_search_thread(tid, prm);
+}

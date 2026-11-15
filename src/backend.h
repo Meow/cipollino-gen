@@ -48,8 +48,10 @@ public:
 };
 
 // Each returns an empty list if the backend is not compiled in or finds no device.
-// `devices` selects CUDA device indices; empty means all.
+// `devices` selects device indices as that backend numbers them; empty means all.
 std::vector<std::unique_ptr<Backend>> create_cuda_backends(const std::vector<int> &devices, std::string &err);
+std::vector<std::unique_ptr<Backend>> create_rocm_backends(const std::vector<int> &devices, std::string &err);
+std::vector<std::unique_ptr<Backend>> create_vulkan_backends(const std::vector<int> &devices, std::string &err);
 std::vector<std::unique_ptr<Backend>> create_metal_backends(std::string &err);
 std::vector<std::unique_ptr<Backend>> create_cpu_backends(unsigned workers);
 

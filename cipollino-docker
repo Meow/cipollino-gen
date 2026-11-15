@@ -1,14 +1,15 @@
 #!/bin/sh
-# Runs cipollino in its container on the machine's NVIDIA GPUs.
+# Runs cipollino in its container on this machine's GPUs.
 #
 #   ./cipollino-docker -n 3 prefixone prefixtwo
+#   ./cipollino-docker --backend vulkan --devices 1 prefix
 #
 # Keys are written to ./keys (override with CIPOLLINO_KEYS) and belong to the calling
 # user. A prefix file for -f has to be visible in the container: put it in the keys
 # directory and pass it as /keys/<name>.
 #
 #   CIPOLLINO_KEYS    host directory for the <address>.onion directories   [./keys]
-#   CIPOLLINO_GPUS    value for docker's --gpus, e.g. '"device=0,2"'        [all]
+#   CIPOLLINO_GPUS    value for docker's --gpus (NVIDIA), e.g. '"device=0,2"' [all]
 #   CIPOLLINO_IMAGE   image to run                                         [cipollino]
 set -eu
 
@@ -19,10 +20,24 @@ chmod 700 "$keys"
 tty=
 [ -t 0 ] && [ -t 2 ] && tty=-it
 
+# NVIDIA GPUs come in through nvidia-container-toolkit; AMD and Intel GPUs are plain
+# device nodes: /dev/dri for Vulkan, /dev/kfd for ROCm. The container runs as the calling
+# user, who needs the groups that own those nodes.
+devices=
+if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
+    devices="--gpus ${CIPOLLINO_GPUS:-all}"
+fi
+for node in /dev/dri /dev/kfd; do
+    [ -e "$node" ] && devices="$devices --device $node"
+done
+for node in /dev/dri/renderD* /dev/kfd; do
+    [ -e "$node" ] && devices="$devices --group-add $(stat -c %g "$node")"
+done
+
 # :z relabels the directory so SELinux hosts (Fedora, RHEL) let the container write to it;
 # it is ignored elsewhere.
-exec docker run --rm --init $tty \
-    --gpus "${CIPOLLINO_GPUS:-all}" \
+# shellcheck disable=SC2086  # $tty and $devices are lists of options
+exec docker run --rm --init $tty $devices \
     --user "$(id -u):$(id -g)" \
     -v "$keys:/keys:z" \
     "${CIPOLLINO_IMAGE:-cipollino}" "$@"

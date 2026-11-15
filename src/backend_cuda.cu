@@ -1,10 +1,29 @@
-// CUDA backend (NVIDIA GPUs): one instance per device, compiled with nvcc.
+// CUDA backend (NVIDIA GPUs, nvcc) and ROCm backend (AMD GPUs, hipcc): one instance per
+// device. HIP mirrors CUDA's API name for name, so the two differ only in the header
+// below and in a few numbers; -DCIP_ROCM selects the ROCm build.
 //
-// For testing on machines without CUDA this file also builds as plain C++ against
+// For testing on machines without either, this file also builds as plain C++ against
 // tests/cuda_sim.h (CIP_CUDA_SIM), which emulates the handful of runtime calls used here.
-#ifndef CIP_CUDA_SIM
+#if defined(CIP_CUDA_SIM)
+// tests/cuda_sim.h was force-included
+#elif defined(CIP_ROCM)
+#include "hip_as_cuda.h"
+#define CIP_LAUNCH(kernel, grid, block, ...) kernel<<<(grid), (block)>>>(__VA_ARGS__)
+#else
 #include <cuda_runtime.h>
 #define CIP_LAUNCH(kernel, grid, block, ...) kernel<<<(grid), (block)>>>(__VA_ARGS__)
+#endif
+
+// The kernel entry points have external linkage, so the two builds need different names
+// to live in one binary.
+#if defined(CIP_ROCM)
+#define CIP_API "ROCm"
+#define CIP_KERNEL cip_kernel_rocm
+#define CIP_CREATE create_rocm_backends
+#else
+#define CIP_API "CUDA"
+#define CIP_KERNEL cip_kernel_cuda
+#define CIP_CREATE create_cuda_backends
 #endif
 
 #include <algorithm>
@@ -19,19 +38,19 @@
 #include "kernel/search.h"
 
 template <int SMODE>
-__global__ void cip_kernel(u32 *state, const u32 *table, u32 *scratch, u32 *hitctr, u32 *hits,
+__global__ void CIP_KERNEL(u32 *state, const u32 *table, u32 *scratch, u32 *hitctr, u32 *hits,
                            const u32 *filt, const u32 *bitmap, cip_params prm)
 {
     u32 tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= prm.nthreads) return;
-    cip_search_thread<SMODE>(tid, state, table, scratch, hitctr, hits, filt, bitmap, prm);
+    cip_search_thread<SMODE>(tid, prm CIP_BUFS);
 }
 
 namespace {
 
 void check(cudaError_t e, const char *what)
 {
-    if (e != cudaSuccess) throw std::runtime_error(std::string("CUDA: ") + what + ": " + cudaGetErrorString(e));
+    if (e != cudaSuccess) throw std::runtime_error(std::string(CIP_API ": ") + what + ": " + cudaGetErrorString(e));
 }
 
 class CudaBackend : public Backend {
@@ -53,10 +72,10 @@ public:
     {
         if (cudaSetDevice(dev_) != cudaSuccess) return;
         for (u32 *p : {state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_})
-            if (p) cudaFree(p);
+            if (p) (void)cudaFree(p);
     }
 
-    std::string describe() const override { return "CUDA #" + std::to_string(dev_) + ": " + name_; }
+    std::string describe() const override { return CIP_API " #" + std::to_string(dev_) + ": " + name_; }
 
     // 1024 threads per multiprocessor. Measured on an RTX 4090 (128 SMs): 512 per SM is
     // about 5% slower, 2048 about 1% faster for twice the memory.
@@ -138,11 +157,11 @@ public:
         check(cudaMemset(hitctr_, 0, 4), "cudaMemset");
         unsigned grid = (prm_.nthreads + kBlock - 1) / kBlock;
         if (smode_ == CIP_SCRATCH_FULL)
-            CIP_LAUNCH(cip_kernel<CIP_SCRATCH_FULL>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
+            CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_FULL>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
         else if (smode_ == CIP_SCRATCH_LEAN)
-            CIP_LAUNCH(cip_kernel<CIP_SCRATCH_LEAN>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
+            CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_LEAN>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
         else
-            CIP_LAUNCH(cip_kernel<CIP_SCRATCH_HALF>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
+            CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_HALF>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
         check(cudaGetLastError(), "kernel launch");
         check(cudaDeviceSynchronize(), "kernel execution");
 
@@ -170,7 +189,7 @@ private:
         void *p = nullptr;
         cudaError_t e = cudaMalloc(&p, std::max<size_t>(bytes, 4));
         if (e != cudaSuccess)
-            throw std::runtime_error("CUDA: allocating " + std::to_string(bytes >> 20) + " MiB on device " +
+            throw std::runtime_error(CIP_API ": allocating " + std::to_string(bytes >> 20) + " MiB on device " +
                                      std::to_string(dev_) + " failed: " + cudaGetErrorString(e) +
                                      " (lower --threads or --pairs, or use --scratch half)");
         return (u32 *)p;
@@ -188,13 +207,13 @@ private:
 
 }  // namespace
 
-std::vector<std::unique_ptr<Backend>> create_cuda_backends(const std::vector<int> &devices, std::string &err)
+std::vector<std::unique_ptr<Backend>> CIP_CREATE(const std::vector<int> &devices, std::string &err)
 {
     std::vector<std::unique_ptr<Backend>> v;
     int count = 0;
     cudaError_t e = cudaGetDeviceCount(&count);
     if (e != cudaSuccess || count <= 0) {
-        err = e != cudaSuccess ? std::string("CUDA: ") + cudaGetErrorString(e) : "no CUDA device found";
+        err = e != cudaSuccess ? std::string(CIP_API ": ") + cudaGetErrorString(e) : "no " CIP_API " device found";
         return v;
     }
     std::vector<int> use = devices;
@@ -202,10 +221,10 @@ std::vector<std::unique_ptr<Backend>> create_cuda_backends(const std::vector<int
         for (int i = 0; i < count; i++) use.push_back(i);
     try {
         for (int d : use) {
-            if (d < 0 || d >= count) throw std::runtime_error("no CUDA device " + std::to_string(d));
+            if (d < 0 || d >= count) throw std::runtime_error("no " CIP_API " device " + std::to_string(d));
             // Sleep instead of spinning a CPU core while a launch runs. Best effort: it
             // only takes effect if the device has not been initialised yet.
-            if (cudaSetDevice(d) == cudaSuccess) cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+            if (cudaSetDevice(d) == cudaSuccess) (void)cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
             v.emplace_back(new CudaBackend(d));
         }
     } catch (const std::exception &ex) {

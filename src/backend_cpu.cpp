@@ -28,6 +28,22 @@ std::vector<std::unique_ptr<Backend>> create_cuda_backends(const std::vector<int
 }
 #endif
 
+#ifndef CIP_HAVE_ROCM
+std::vector<std::unique_ptr<Backend>> create_rocm_backends(const std::vector<int> &, std::string &err)
+{
+    err = "this build has no ROCm support (build on a machine with hipcc)";
+    return {};
+}
+#endif
+
+#ifndef CIP_HAVE_VULKAN
+std::vector<std::unique_ptr<Backend>> create_vulkan_backends(const std::vector<int> &, std::string &err)
+{
+    err = "this build has no Vulkan support (needs the Vulkan headers and glslangValidator)";
+    return {};
+}
+#endif
+
 #ifndef CIP_HAVE_METAL
 std::vector<std::unique_ptr<Backend>> create_metal_backends(std::string &err)
 {
@@ -107,17 +123,16 @@ public:
     }
 
 private:
-    void run_thread(uint32_t tid, uint32_t *ctr)
+    void run_thread(uint32_t tid, uint32_t *hitctr)
     {
+        uint32_t *state = state_.data(), *scratch = scratch_.data(), *hits = hits_.data();
+        const uint32_t *table = table_.data(), *filt = filt_.data(), *bitmap = bitmap_.data();
         if (smode_ == CIP_SCRATCH_FULL)
-            cip_search_thread<CIP_SCRATCH_FULL>(tid, state_.data(), table_.data(), scratch_.data(), ctr, hits_.data(),
-                                                filt_.data(), bitmap_.data(), prm_);
+            cip_search_thread<CIP_SCRATCH_FULL>(tid, prm_ CIP_BUFS);
         else if (smode_ == CIP_SCRATCH_LEAN)
-            cip_search_thread<CIP_SCRATCH_LEAN>(tid, state_.data(), table_.data(), scratch_.data(), ctr, hits_.data(),
-                                                filt_.data(), bitmap_.data(), prm_);
+            cip_search_thread<CIP_SCRATCH_LEAN>(tid, prm_ CIP_BUFS);
         else
-            cip_search_thread<CIP_SCRATCH_HALF>(tid, state_.data(), table_.data(), scratch_.data(), ctr, hits_.data(),
-                                                filt_.data(), bitmap_.data(), prm_);
+            cip_search_thread<CIP_SCRATCH_HALF>(tid, prm_ CIP_BUFS);
     }
 
     unsigned workers_;

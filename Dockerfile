@@ -1,10 +1,11 @@
-# cipollino for NVIDIA GPUs.
+# cipollino with the CUDA and Vulkan backends: NVIDIA GPUs through either, AMD and Intel
+# GPUs through Vulkan (Mesa). For AMD GPUs through ROCm see Dockerfile.rocm.
 #
 #   docker build -t cipollino .                      (or: make docker)
 #   ./cipollino-docker -n 2 someprefix               keys land in ./keys
 #
-# The host needs the NVIDIA driver and nvidia-container-toolkit, nothing else.
-# Targets: `runtime` (default; the binary and its two shared libraries) and `build`
+# The host needs its GPU driver (and nvidia-container-toolkit for NVIDIA), nothing else.
+# Targets: `runtime` (default; the binary and the libraries it loads) and `build`
 # (toolchain and sources, for `make test-gpu` and for poking at the kernel).
 
 ARG CUDA_VERSION=12.6.3
@@ -16,8 +17,11 @@ RUN pkg="$(echo "$CUDA_VERSION" | cut -d. -f1,2 | tr . -)" \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       "cuda-nvcc-$pkg" "cuda-cudart-dev-$pkg" g++ make pkg-config libsodium-dev python3 \
+      libvulkan-dev glslang-tools xxd libvulkan1 mesa-vulkan-drivers libxext6 libegl1 \
  && rm -rf /var/lib/apt/lists/*
 ENV PATH=/usr/local/cuda/bin:$PATH
+# Have nvidia-container-toolkit mount the driver's Vulkan parts too, not only CUDA's.
+ENV NVIDIA_DRIVER_CAPABILITIES=all
 
 # No GPU is visible during `docker build`, so -arch=native cannot work here. all-major
 # embeds machine code for every GPU generation this nvcc knows, plus PTX for newer ones.
@@ -30,9 +34,12 @@ RUN make -j"$(nproc)" CUDA_ARCH="$CUDA_ARCH" \
  && make test-host CUDA_ARCH="$CUDA_ARCH"
 
 FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS runtime
+# Vulkan: the loader, Mesa's drivers for AMD and Intel, and libXext and libEGL, which
+# NVIDIA's Vulkan driver (mounted in by nvidia-container-toolkit) needs even headless.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libsodium23 \
+ && apt-get install -y --no-install-recommends libsodium23 libvulkan1 mesa-vulkan-drivers libxext6 libegl1 \
  && rm -rf /var/lib/apt/lists/*
+ENV NVIDIA_DRIVER_CAPABILITIES=all
 COPY --from=build /src/cipollino /usr/local/bin/cipollino
 COPY docker/entrypoint.sh /usr/local/bin/cipollino-entrypoint
 WORKDIR /keys
