@@ -1,0 +1,62 @@
+# Creates a draft GitHub release of one commit, with the programs CI built from it attached.
+#
+# Started by hand: Actions -> Release -> Run workflow, choose the branch (or tag) to
+# release and give the release's tag, e.g. v1.2.3. Nothing is compiled here: the Windows
+# program is taken from the "Windows build" run of that very commit, so what is released
+# is what was tested. The release stays a draft until you publish it, and only then is
+# its tag created (which in turn builds the container images for that version).
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release, e.g. v1.2.3
+        required: true
+        type: string
+
+permissions:
+  contents: write  # create the release
+  actions: read    # fetch the build's artifact
+
+jobs:
+  draft:
+    name: Draft release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check the tag
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+            echo "::error::'$TAG' is not a usable tag name"
+            exit 1
+          fi
+
+      - name: Find the Windows build of this commit
+        id: build
+        run: |
+          run=$(gh api "repos/$GH_REPO/actions/runs?head_sha=$GITHUB_SHA&status=success&per_page=100" \
+                  --jq '[.workflow_runs[] | select(.path == ".github/workflows/windows.yml")][0].id // empty')
+          if [ -z "$run" ]; then
+            echo "::error::No successful Windows build of $GITHUB_SHA: run the Windows build on this commit first."
+            exit 1
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and pack it
+        env:
+          RUN: ${{ steps.build.outputs.run }}
+        run: |
+          gh run download "$RUN" --name cipollino-windows-x64 --dir "cipollino-$TAG-windows-x64"
+          mkdir assets
+          zip -r "assets/cipollino-$TAG-windows-x64.zip" "cipollino-$TAG-windows-x64"
+          (cd assets && sha256sum -- * > SHA256SUMS)
+
+      - name: Create the draft
+        run: |
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "cipollino $TAG" \
+            --generate-notes assets/*
