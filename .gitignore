@@ -1,4 +1,5 @@
 build/
 /cipollino
+/keys/
 *.onion/
 __pycache__/

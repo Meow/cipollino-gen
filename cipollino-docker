@@ -1,0 +1,28 @@
+#!/bin/sh
+# Runs cipollino in its container on the machine's NVIDIA GPUs.
+#
+#   ./cipollino-docker -n 3 prefixone prefixtwo
+#
+# Keys are written to ./keys (override with CIPOLLINO_KEYS) and belong to the calling
+# user. A prefix file for -f has to be visible in the container: put it in the keys
+# directory and pass it as /keys/<name>.
+#
+#   CIPOLLINO_KEYS    host directory for the <address>.onion directories   [./keys]
+#   CIPOLLINO_GPUS    value for docker's --gpus, e.g. '"device=0,2"'        [all]
+#   CIPOLLINO_IMAGE   image to run                                         [cipollino]
+set -eu
+
+keys=${CIPOLLINO_KEYS:-$PWD/keys}
+mkdir -p "$keys"
+chmod 700 "$keys"
+
+tty=
+[ -t 0 ] && [ -t 2 ] && tty=-it
+
+# :z relabels the directory so SELinux hosts (Fedora, RHEL) let the container write to it;
+# it is ignored elsewhere.
+exec docker run --rm --init $tty \
+    --gpus "${CIPOLLINO_GPUS:-all}" \
+    --user "$(id -u):$(id -g)" \
+    -v "$keys:/keys:z" \
+    "${CIPOLLINO_IMAGE:-cipollino}" "$@"

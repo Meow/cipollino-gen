@@ -1,0 +1,7 @@
+.git
+build
+cipollino
+keys
+*.onion
+**/__pycache__
+README.md

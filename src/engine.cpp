@@ -227,6 +227,11 @@ public:
         // Which scratch mode is fastest depends on how the device's arithmetic throughput
         // compares with its memory bandwidth, so unless told, measure the candidates.
         std::vector<uint32_t> modes = opt.scratch >= 0 ? std::vector<uint32_t>{(uint32_t)opt.scratch} : be_.scratch_candidates();
+        struct Trial {
+            uint32_t mode, pairs;
+            double rate;
+        };
+        std::vector<Trial> trials;
         std::string report, problem;
         double best = -1;
         for (uint32_t mode : modes) {
@@ -240,13 +245,19 @@ public:
                 continue;
             }
             if (modes.size() > 1) report += std::string(report.empty() ? "" : ", ") + scratch_name(mode) + " " + human(rate, "keys/s");
-            if (rate > best) {
-                best = rate;
-                smode_ = mode;
-                N_ = n;
-            }
+            trials.push_back(Trial{mode, n, rate});
+            best = std::max(best, rate);
         }
-        if (best < 0) throw std::runtime_error(problem);
+        if (trials.empty()) throw std::runtime_error(problem);
+        // Differences under 2% are measurement noise: among the modes that close to the
+        // fastest, take the one that needs the least device memory.
+        const Trial *pick = nullptr;
+        for (const Trial &t : trials)
+            if (t.rate >= 0.98 * best &&
+                (!pick || scratch_bytes(T_, t.pairs, t.mode) < scratch_bytes(T_, pick->pairs, pick->mode)))
+                pick = &t;
+        smode_ = pick->mode;
+        N_ = pick->pairs;
         if (modes.size() > 1 && !opt.quiet)
             sh_.say("device " + std::to_string(index_) + ": scratch modes: " + report + " -> " + scratch_name(smode_));
 

@@ -94,12 +94,18 @@ $(BUILD)/sim_backend_cuda.o: src/backend_cuda.cu tests/cuda_sim.h $(HDRS) | $(BU
 $(BUILD)/cipollino-cudasim: $(SIM_OBJS)
 	$(CXX) -o $@ $(SIM_OBJS) $(SODIUM_LIBS) -lpthread
 
-test: cipollino $(FIELD_SHIM) $(BUILD)/cipollino-cudasim
+test: test-host test-gpu
+
+# Everything that needs no GPU (so it can run inside `docker build`).
+test-host: cipollino $(FIELD_SHIM) $(BUILD)/cipollino-cudasim
 	python3 tests/test_field.py $(FIELD_SHIM)
 	./cipollino --backend cpu --selftest
 	$(BUILD)/cipollino-cudasim --backend cuda --selftest
 	python3 tests/test_cli.py ./cipollino cpu
 	python3 tests/test_cli.py $(BUILD)/cipollino-cudasim cuda
+
+# The GPU backends this build has, on the real device.
+test-gpu: cipollino
 ifeq ($(METAL),1)
 	./cipollino --backend metal --selftest
 	python3 tests/test_cli.py ./cipollino metal
@@ -109,7 +115,20 @@ ifeq ($(CUDA),1)
 	python3 tests/test_cli.py ./cipollino cuda
 endif
 
+# ---- docker (NVIDIA) --------------------------------------------------------------------
+# `make docker` builds the runtime image (running the host tests on the way) and the :dev
+# image that keeps the toolchain; `make docker-test` runs the GPU tests in the latter.
+
+DOCKER_IMAGE ?= cipollino
+
+docker:
+	docker build --target runtime -t $(DOCKER_IMAGE) .
+	docker build --target build -t $(DOCKER_IMAGE):dev .
+
+docker-test: docker
+	docker run --rm --gpus all $(DOCKER_IMAGE):dev make test-gpu
+
 clean:
 	rm -rf $(BUILD) cipollino
 
-.PHONY: all test clean FORCE
+.PHONY: all test test-host test-gpu docker docker-test clean FORCE

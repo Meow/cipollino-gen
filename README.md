@@ -44,6 +44,34 @@ The CUDA build targets the GPU in the build machine (`-arch=native`). If your nv
 too old to know that flag, name the generation instead, e.g. `make CUDA_ARCH=sm_75`.
 Windows is not supported (use WSL 2).
 
+### Docker (NVIDIA)
+
+The host needs only the NVIDIA driver, Docker and nvidia-container-toolkit; no CUDA
+toolkit, compiler or libsodium.
+
+```
+make docker                          # builds cipollino (255 MB) and cipollino:dev
+make docker-test                     # GPU self-test and end-to-end tests in the container
+./cipollino-docker -n 2 someprefix   # keys land in ./keys, owned by you
+```
+
+`cipollino-docker` is a thin wrapper around
+
+```
+docker run --rm --init --gpus all --user "$(id -u):$(id -g)" -v "$PWD/keys:/keys:z" cipollino ARGS
+```
+
+and takes `CIPOLLINO_KEYS` (output directory), `CIPOLLINO_GPUS` (docker's `--gpus`
+value) and `CIPOLLINO_IMAGE`. A prefix file for `-f` must be visible inside the
+container: put it in the keys directory and pass `/keys/<name>`.
+
+The container refuses to start a search whose output directory is not mounted from
+outside, because a key written to the container's own filesystem disappears with it.
+
+The image is built with `-arch=all-major`, so it carries machine code for every GPU
+generation its nvcc knows. `cipollino:dev` keeps the toolchain and sources (`/src`) for
+rebuilding with other flags.
+
 ## Usage
 
 ```
@@ -70,37 +98,33 @@ the requested number of keys was found, 130 when interrupted first.
 
 Every extra character multiplies the work by 32:
 
-| prefix length | keys to test (average) | at 1.5 G keys/s |
-|---|---|---|
-| 5 | 3.4e7 | instant |
-| 6 | 1.1e9 | 0.7 s |
-| 7 | 3.4e10 | 23 s |
-| 8 | 1.1e12 | 12 min |
-| 9 | 3.5e13 | 6.5 h |
-| 10 | 1.1e15 | 8.7 days |
-| 11 | 3.6e16 | 9 months |
+| prefix length | keys to test (average) | at 1.5 G keys/s (M5 Pro) | at 15 G keys/s (RTX 4090) |
+|---|---|---|---|
+| 6 | 1.1e9 | 0.7 s | instant |
+| 7 | 3.4e10 | 23 s | 2.3 s |
+| 8 | 1.1e12 | 12 min | 73 s |
+| 9 | 3.5e13 | 6.5 h | 39 min |
+| 10 | 1.1e15 | 8.7 days | 21 h |
+| 11 | 3.6e16 | 9 months | 28 days |
+| 12 | 1.2e18 | 24 years | 2.4 years |
 
 Searching for several prefixes costs nothing extra per key, so the time to the *first*
 hit divides by the number of (equally long) prefixes.
 
 ## Speed
 
-Measured on an Apple M5 Pro (20-core GPU), `cipollino --bench`:
+Measured with `cipollino --bench`:
 
-| backend | keys/s |
-|---|---|
-| Metal, first ~20 s | 1.7 G |
-| Metal, sustained (laptop in "Automatic" power mode, heat-soaked) | 1.0 - 1.5 G |
-| CPU fallback, 18 cores | 150 M |
+| device | backend | keys/s |
+|---|---|---|
+| NVIDIA RTX 4090 (in Docker, 60 s run) | CUDA | 15.5 G |
+| Apple M5 Pro, first ~20 s | Metal | 1.7 G |
+| Apple M5 Pro, sustained (laptop in "Automatic" power mode, heat-soaked) | Metal | 1.0 - 1.5 G |
+| Apple M5 Pro, 18 cores | CPU fallback | 150 M |
 
-**CUDA has not been run on a GPU by me.** I had no NVIDIA hardware: the CUDA backend
-compiles and links with real nvcc 12.6 (the disassembly for an RTX 40 target shows about
-2000 instructions per pair of keys, 900 of them 32x32->64 multiply-adds, no spills), its
-host code is tested against a simulated CUDA runtime, and the kernel is the same source
-that passes the exhaustive tests on Metal and the CPU. The first real run is yours;
-`./cipollino --selftest` and then `./cipollino --tune` are the things to run first. A
-start-up self-test runs on every launch regardless (see Security), so a miscompiling or
-faulty GPU makes the program stop, not emit bad keys.
+On the 4090 the search runs at the card's 450 W power limit with the memory controller
+28% busy (`half` scratch mode), so it is bound by arithmetic, not by memory. An
+8-character prefix took 99 s (1.5e12 keys) in a real run.
 
 ## How it works
 
@@ -203,14 +227,16 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
 - `--scratch` trades device memory traffic for arithmetic. `full` stores two field
   elements per pair, `lean` one (and pays one extra squaring), `half` one per two pairs
   (half a multiplication more). Fast GPUs can outrun their memory bandwidth, so on CUDA
-  the three are measured at start-up and the fastest is used. On Apple GPUs `lean` wins.
-- `--threads`: CUDA defaults to 512 per multiprocessor, Metal to 65536. More threads cost
-  memory; too few leave the GPU idle.
+  the three are measured at start-up; the fastest is used, or the one needing least
+  memory among those within 2% of it. On an RTX 4090 `full` saturates the memory bus
+  (11.7 G keys/s) while `lean` and `half` reach 15.5-16 G. On Apple GPUs `lean` wins.
+- `--threads`: CUDA defaults to 1024 per multiprocessor (131072 on a 4090), Metal to
+  65536. More threads cost memory; too few leave the GPU idle.
 - `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024);
   memory is `threads * pairs * 32` bytes in `lean` mode.
 - `make CUDA_AOS=1` switches the CUDA scratch layout from one-word-per-warp-access to
-  one-slot-per-thread. On Apple GPUs that layout is clearly better; on NVIDIA I expect
-  the default to win but could not measure it.
+  one-slot-per-thread. On Apple GPUs that layout is clearly better; on an RTX 4090 the
+  two are within noise in `half` mode and the default is 8% faster in `lean`.
 
 On a laptop the GPU is thermally limited within a minute; macOS's High Power mode, where
 available, raises the sustained rate.
@@ -218,7 +244,8 @@ available, raises the sustained rate.
 ## Tests
 
 ```
-make test
+make test          # everything this machine can run
+make docker-test   # the GPU part inside the container (NVIDIA)
 ```
 
 - `tests/test_field.py`: field arithmetic against Python big integers, including the
@@ -239,4 +266,5 @@ src/keys.cpp           all secret-key handling (libsodium)
 src/ed.cpp             public-point helpers and the kernel table
 src/filter.cpp         prefixes -> GPU filter tables
 src/onion.cpp          SHA3-256, address encoding
+Dockerfile, docker/, cipollino-docker    container build, entry-point guard, run wrapper
 ```
