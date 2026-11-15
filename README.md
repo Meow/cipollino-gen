@@ -72,7 +72,8 @@ ctest --test-dir build
 
 `-DCIP_CUDA_ARCH=all` makes a program that is not tied to the build machine's GPU. That is
 what `.github/workflows/windows.yml` builds on every push and keeps as the
-`cipollino-windows-x64` artifact.
+`cipollino-windows-x64` artifact; the manually started `release.yml` attaches that
+program to a draft release.
 
 What differs from the other systems:
 
