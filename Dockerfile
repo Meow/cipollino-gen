@@ -23,9 +23,11 @@ ENV PATH=/usr/local/cuda/bin:$PATH
 # Have nvidia-container-toolkit mount the driver's Vulkan parts too, not only CUDA's.
 ENV NVIDIA_DRIVER_CAPABILITIES=all
 
-# No GPU is visible during `docker build`, so -arch=native cannot work here. all-major
-# embeds machine code for every GPU generation this nvcc knows, plus PTX for newer ones.
-ARG CUDA_ARCH=all-major
+# No GPU is visible during `docker build`, so -arch=native cannot work here. `all` embeds
+# machine code for every GPU architecture this nvcc knows. (`all-major` would be a
+# quarter of the size, but an RTX 4090 then runs code generated for the 30 series and is
+# 6% slower.)
+ARG CUDA_ARCH=all
 WORKDIR /src
 COPY Makefile ./
 COPY src src

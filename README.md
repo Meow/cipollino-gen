@@ -99,8 +99,9 @@ container: put it in the keys directory and pass `/keys/<name>`.
 The container refuses to start a search whose output directory is not mounted from
 outside, because a key written to the container's own filesystem disappears with it.
 
-The CUDA code is built with `-arch=all-major` and the ROCm code for the generic target
-of every GPU family, so the images are not tied to the build machine's GPU. The `:dev`
+The CUDA code is built for every architecture nvcc knows (`-arch=all`) and the ROCm code
+for the generic target of every GPU family, so the images are not tied to the build
+machine's GPU. The `:dev`
 images keep the toolchain and sources (`/src`) for rebuilding with other flags.
 
 ## Usage
@@ -130,15 +131,15 @@ the requested number of keys was found, 130 when interrupted first.
 
 Every extra character multiplies the work by 32:
 
-| prefix length | keys to test (average) | at 1.5 G keys/s (M5 Pro) | at 15 G keys/s (RTX 4090) |
+| prefix length | keys to test (average) | at 1.5 G keys/s (M5 Pro) | at 16.5 G keys/s (RTX 4090) |
 |---|---|---|---|
 | 6 | 1.1e9 | 0.7 s | instant |
-| 7 | 3.4e10 | 23 s | 2.3 s |
-| 8 | 1.1e12 | 12 min | 73 s |
-| 9 | 3.5e13 | 6.5 h | 39 min |
-| 10 | 1.1e15 | 8.7 days | 21 h |
-| 11 | 3.6e16 | 9 months | 28 days |
-| 12 | 1.2e18 | 24 years | 2.4 years |
+| 7 | 3.4e10 | 23 s | 2.1 s |
+| 8 | 1.1e12 | 12 min | 67 s |
+| 9 | 3.5e13 | 6.5 h | 36 min |
+| 10 | 1.1e15 | 8.7 days | 19 h |
+| 11 | 3.6e16 | 9 months | 25 days |
+| 12 | 1.2e18 | 24 years | 2.2 years |
 
 Searching for several prefixes costs nothing extra per key, so the time to the *first*
 hit divides by the number of (equally long) prefixes.
@@ -149,8 +150,8 @@ Measured with `cipollino --bench`:
 
 | device | backend | keys/s |
 |---|---|---|
-| NVIDIA RTX 4090 | CUDA | 15.5 G |
-| NVIDIA RTX 4090 (also driving a desktop) | Vulkan | 14.6 - 15.3 G |
+| NVIDIA RTX 4090 | CUDA | 16.6 G |
+| NVIDIA RTX 4090 (also driving a desktop) | Vulkan | 14.5 - 15.3 G |
 | Apple M5 Pro, first ~20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, sustained (laptop in "Automatic" power mode, heat-soaked) | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU fallback | 150 M |
@@ -161,11 +162,35 @@ The 4090 and the Radeon were measured in the Docker images. With `auto`, a nativ
 preferred over Vulkan (CUDA, ROCm, Metal, then Vulkan); they are never mixed, as that
 would drive one GPU twice.
 
-On the 4090 the search runs at the card's 450 W power limit with the memory controller
-28% busy (`half` scratch mode), so it is bound by arithmetic, not by memory. An
-8-character prefix took 99 s (1.5e12 keys) in a real run. No discrete AMD or any Intel
-GPU has been tried; the Radeon 610M's results also jump between about 60 and 105 M
-keys/s depending on thread count and scratch mode in a way I have not explained.
+No discrete AMD or any Intel GPU has been tried; the Radeon 610M's results also jump
+between about 60 and 105 M keys/s depending on thread count and scratch mode in a way I
+have not explained.
+
+### What limits the 4090
+
+The card runs the search at its 450 W power limit, so what counts is energy per key, not
+instructions per key. Measured at that limit: a 32x32->64 multiply-add costs about three
+times an add (0.040 nJ against 0.013), and a byte of scratch traffic to memory about as
+much as three multiply-adds (0.13 nJ). Of the roughly 55 nJ a pair of keys costs, about 38
+are its ~950 wide multiplies, 12 the other 850 instructions and 5 to 8 the scratch
+traffic.
+
+That is why the obvious things do little there. With the scratch traffic removed
+altogether (not a working configuration) the kernel reaches 17.7 G keys/s, which is the
+ceiling for this algorithm on this card; cutting the scratch further costs more
+multiplications than it saves memory. Fewer or longer threads, register limits and block
+sizes all sit within a few percent. What did help, 15.2 to 16.6 G keys/s together:
+
+- the scratch slot of the next pair is fetched one pair early, so its cache miss overlaps
+  with arithmetic instead of stalling the thread;
+- each thread's scratch slot is contiguous instead of spread over eight cache lines;
+- the 32x32->64 products are spelled in PTX. Written in C, nvcc hoists the
+  zero-extension of loop-invariant operands out of the loop and ptxas then emits a dead
+  add after every product (92 per pair in the forward pass);
+- twice as many threads per multiprocessor.
+
+Raising the card's power limit (`nvidia-smi -pl`, 500 W at most on this one) is the
+remaining knob; I did not try it.
 
 **Use CUDA, not Vulkan, on an NVIDIA GPU that also runs a desktop.** The kernels are
 equally fast (Vulkan reaches 16 G keys/s in short runs), but NVIDIA's driver cannot
@@ -209,10 +234,13 @@ What makes it fast:
    255, which columns 8 and 9 determine except in about one product in 4000. That case
    is detected and falls back to the full product. A candidate costs 20 wide and 20
    narrow multiplies and no carry chain instead of 100 wide ones and a reduction.
-4. **A carry chain without the wrap-around pass**: the carry out of bit 255 is estimated
+4. **Scratch fetched a pair ahead** (CUDA). The backward pass reads back one stored
+   field element per pair from gigabytes of scratch; it asks for the next pair's while
+   working on the current one.
+5. **A carry chain without the wrap-around pass**: the carry out of bit 255 is estimated
    (to within one) before the chain and folded in up front, so one pass leaves limbs that
    pack into 256 bits with shifts alone.
-5. **Radix 2^25.5 with unsigned limbs**: every partial product is a 32x32->64
+6. **Radix 2^25.5 with unsigned limbs**: every partial product is a 32x32->64
    multiply-add into a 64-bit column, which is the one thing both NVIDIA (`IMAD.WIDE`)
    and Apple GPUs do well. I measured 8x32 saturated, 5x51 and precomputed-multiple
    variants on the M5; all were slower.
@@ -281,18 +309,18 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
   elements per pair, `lean` one (and pays one extra squaring), `half` one per two pairs
   (half a multiplication more). Fast GPUs can outrun their memory bandwidth, so on CUDA
   the three are measured at start-up; the fastest is used, or the one needing least
-  memory among those within 2% of it. On an RTX 4090 `full` saturates the memory bus
-  (11.7 G keys/s) while `lean` and `half` reach 15.5-16 G. On Apple GPUs `lean` wins.
-- `--threads`: CUDA and ROCm default to 1024 per multiprocessor as the runtime counts
-  them (131072 on a 4090), Metal to 65536. Vulkan cannot ask a device how wide it is and uses 131072
+  memory among those within 2% of it. On an RTX 4090 `lean` wins (16.6 G keys/s against
+  15.0 for `half` and 13.9 for `full`, which saturates the memory bus), on Apple GPUs too.
+- `--threads`: CUDA defaults to 2048 per multiprocessor (262144 on a 4090), ROCm to 1024
+  per compute unit as the runtime counts them, Metal to 65536. Vulkan cannot ask a device how wide it is and uses 131072
   for discrete GPUs, 16384 for integrated ones. More threads cost memory; too few leave
   the GPU idle.
 - `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024);
   memory is `threads * pairs * 32` bytes in `lean` mode.
-- `make CUDA_AOS=1` switches the CUDA scratch layout from one-word-per-warp-access to
-  one-slot-per-thread. On Apple GPUs that layout is clearly better; on an RTX 4090 the
-  two are within noise in `half` mode and the default is 8% faster in `lean`.
-  `make ROCM_AOS=1` is the same switch for ROCm (no difference on the Radeon 610M).
+- The scratch layout is a build option per backend (`CUDA_AOS`, `ROCM_AOS`, `VULKAN_AOS`,
+  1 = each thread's slot contiguous, 0 = one word per thread side by side). CUDA and
+  Metal use 1, which is 10% faster on the 4090 in `lean` mode; for Vulkan and for ROCm
+  on the Radeon 610M the two measured the same and they stay at 0.
 
 On a laptop the GPU is thermally limited within a minute; macOS's High Power mode, where
 available, raises the sustained rate.

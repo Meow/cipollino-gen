@@ -85,7 +85,8 @@ CIP_FN void cip_scratch_store(u32 slot, u32 tid, u32 T, fe a CIP_BUFS_DECL)
     scratch[at + 7u * stride] = p.w[7];
 }
 
-CIP_FN fe cip_scratch_load(u32 slot, u32 tid, u32 T CIP_BUFS_DECL)
+// The eight raw words of a scratch slot (fe_unpack turns them back into a field element).
+CIP_FN fe8 cip_scratch_fetch(u32 slot, u32 tid, u32 T CIP_BUFS_DECL)
 {
     fe8 p;
     u32 at = CIP_SCRATCH_AT(slot, tid, T);
@@ -98,8 +99,20 @@ CIP_FN fe cip_scratch_load(u32 slot, u32 tid, u32 T CIP_BUFS_DECL)
     p.w[5] = scratch[at + 5u * stride];
     p.w[6] = scratch[at + 6u * stride];
     p.w[7] = scratch[at + 7u * stride];
-    return fe_unpack(p);
+    return p;
 }
+
+// With CIP_FETCH_AHEAD the backward pass fetches a scratch slot one pair before it uses
+// it: the fetch misses the caches, and a thread with a whole pair of arithmetic to do in
+// the meantime does not wait for it. CIP_AHEAD declares the look-ahead buffer primed with
+// the first slot, CIP_TAKE yields slot `cur` and requests slot `next`.
+#if CIP_FETCH_AHEAD
+#define CIP_AHEAD(buf, first) fe8 buf = cip_scratch_fetch(first, tid, T CIP_BUFS)
+#define CIP_TAKE(dst, buf, cur, next) dst = buf; buf = cip_scratch_fetch(next, tid, T CIP_BUFS)
+#else
+#define CIP_AHEAD(buf, first)
+#define CIP_TAKE(dst, buf, cur, next) dst = cip_scratch_fetch(cur, tid, T CIP_BUFS)
+#endif
 
 // Rare path: a candidate passed the 32-bit / bitmap pre-filter. Confirm against the full
 // 64-bit filter records and append a hit. The host re-derives and re-checks everything.
@@ -202,20 +215,29 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
         fe inv_all = fe_invert(p);
 
         // Backward pass: peel one inverse per pair and finish both of its candidates.
+        // (Fetching the table entry ahead as well as the scratch makes the 4090 slower again.)
         if (smode == CIP_SCRATCH_FULL) {
+            CIP_AHEAD(ahead_p, 2u * N - 2u);
+            CIP_AHEAD(ahead_e, 2u * N - 1u);
             for (u32 i = N; i-- > 0u;) {
                 u32 q = tab_pt + 30u * i;
+                fe8 mine_p, mine_e;
+                CIP_TAKE(mine_p, ahead_p, 2u * i, 2u * (i > 0u ? i - 1u : 0u));
+                CIP_TAKE(mine_e, ahead_e, 2u * i + 1u, 2u * (i > 0u ? i - 1u : 0u) + 1u);
                 fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
-                fe d = fe_one_minus(cip_scratch_load(2u * i + 1u, tid, T CIP_BUFS));
-                fe inv = fe_mul(inv_all, cip_scratch_load(2u * i, tid, T CIP_BUFS));
+                fe d = fe_one_minus(fe_unpack(mine_e));
+                fe inv = fe_mul(inv_all, fe_unpack(mine_p));
                 inv_all = fe_mul(inv_all, d);
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else if (smode == CIP_SCRATCH_LEAN) {
+            CIP_AHEAD(ahead, N - 1u);
             for (u32 i = N; i-- > 0u;) {
                 u32 q = tab_pt + 30u * i;
+                fe8 mine;
+                CIP_TAKE(mine, ahead, i, i > 0u ? i - 1u : 0u);
                 fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
-                fe inv = fe_mul(inv_all, cip_scratch_load(i, tid, T CIP_BUFS));
+                fe inv = fe_mul(inv_all, fe_unpack(mine));
                 inv_all = fe_mul(inv_all, fe_one_minus(fe_sq(t)));
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
@@ -226,11 +248,14 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
             // and carried over. One pair per iteration keeps the loop body small, which
             // matters to nvcc: two inlined pairs take it minutes to compile.
             fe t_even = fe_one(), d_even = fe_one(), stored = fe_one();
+            CIP_AHEAD(ahead, N / 2u - 1u);
             for (u32 i = N; i-- > 0u;) {
                 u32 q = tab_pt + 30u * i;
                 fe t, d, before;
                 if ((i & 1u) != 0u) {
-                    stored = cip_scratch_load(i >> 1, tid, T CIP_BUFS);
+                    fe8 mine;
+                    CIP_TAKE(mine, ahead, i >> 1, i > 1u ? (i >> 1) - 1u : 0u);
+                    stored = fe_unpack(mine);
                     t_even = fe_mul(cip_table_load(q - 30u CIP_BUFS), c);
                     d_even = fe_one_minus(fe_sq(t_even));
                     before = fe_mul(stored, d_even);

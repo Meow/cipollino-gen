@@ -17,10 +17,12 @@
 // The kernel entry points have external linkage, so the two builds need different names
 // to live in one binary.
 #if defined(CIP_ROCM)
+#define CIP_THREADS_PER_UNIT 1024
 #define CIP_API "ROCm"
 #define CIP_KERNEL cip_kernel_rocm
 #define CIP_CREATE create_rocm_backends
 #else
+#define CIP_THREADS_PER_UNIT 2048
 #define CIP_API "CUDA"
 #define CIP_KERNEL cip_kernel_cuda
 #define CIP_CREATE create_cuda_backends
@@ -77,18 +79,20 @@ public:
 
     std::string describe() const override { return CIP_API " #" + std::to_string(dev_) + ": " + name_; }
 
-    // 1024 threads per multiprocessor. Measured on an RTX 4090 (128 SMs): 512 per SM is
-    // about 5% slower, 2048 about 1% faster for twice the memory.
-    uint32_t suggested_threads() const override { return (uint32_t)std::max(sm_count_, 1) * 1024; }
+    // Threads per multiprocessor. Measured on an RTX 4090 (128 SMs) in the lean scratch
+    // mode: 512 per SM gives 14.1 G keys/s, 1024 gives 16.0, 2048 gives 16.6, 4096 gives 16.8.
+    // The only AMD device tried, a two-unit iGPU, was fastest at 1024.
+    uint32_t suggested_threads() const override { return (uint32_t)std::max(sm_count_, 1) * kThreadsPerUnit; }
 
     uint64_t scratch_budget() const override
     {
         size_t free_bytes = 0, total_bytes = 0;
         if (cudaSetDevice(dev_) != cudaSuccess || cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess) return 1u << 30;
-        return std::min<uint64_t>(free_bytes / 2, (uint64_t)12 << 30);
+        return std::min<uint64_t>(free_bytes / 2, (uint64_t)6 << 30);
     }
 
-    uint32_t suggested_pairs() const override { return 2048; }
+    // Batches past 512 pairs gain nothing measurable (the inversion is already under 3%).
+    uint32_t suggested_pairs() const override { return 1024; }
 
     // Fast cards can outrun their memory bandwidth, slow ones cannot: measure.
     std::vector<uint32_t> scratch_candidates() const override
@@ -179,6 +183,7 @@ private:
     // The kernels need 160-200 registers per thread, so a multiprocessor only holds a few
     // hundred threads at once; small blocks let it fill up (128 vs 256: +2% on a 4090).
     static constexpr unsigned kBlock = 128;
+    static constexpr unsigned kThreadsPerUnit = CIP_THREADS_PER_UNIT;
 
     // The CUDA runtime tracks the current device per host thread, and the engine calls in
     // from more than one.

@@ -21,7 +21,9 @@ struct fe {
 
 #define CIP_M26 0x3ffffffu
 #define CIP_M25 0x1ffffffu
+#ifndef CIP_MUL  // a 32x32->64 product; defs.h may supply a target-specific spelling
 #define CIP_MUL(a, b) (CIP_U64(a) * CIP_U64(b))
+#endif
 
 CIP_FN fe fe_one()
 {

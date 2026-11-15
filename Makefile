@@ -6,20 +6,21 @@
 #   make CUDA=0 ROCM=0 METAL=0 VULKAN=0     leave a backend out
 #   make CUDA_ARCH=sm_86   target a specific GPU generation instead of the one in this
 #                   machine (needed if your nvcc is too old to know -arch=native)
-#   make CUDA_AOS=1 CUDA build with the array-of-structs scratch layout (see kernel/search.h);
-#                   compare both with `cipollino --bench` if you want the last few percent
+#   make CUDA_AOS=0 ROCM_AOS=1 VULKAN_AOS=1   scratch layout per backend (see kernel/search.h):
+#                   1 = a thread's slot is contiguous (default for CUDA), 0 = one word per
+#                   thread side by side (default for ROCm and Vulkan). Compare with --bench.
 #   make ROCM_ARCH="gfx1100 gfx1030"   AMD GPU architectures to generate code for
-#   make ROCM_AOS=1 the same layout switch for the ROCm build
 
 CXX      ?= c++
 CXXFLAGS ?= -O2
 NVCC     ?= nvcc
-CUDA_AOS ?= 0
+CUDA_AOS ?= 1
 CUDA_ARCH ?= native
 ROCM_PATH ?= /opt/rocm
 HIPCC    ?= $(firstword $(shell command -v hipcc 2>/dev/null) $(wildcard $(ROCM_PATH)/bin/hipcc))
 ROCM_ARCH ?=
 ROCM_AOS ?= 0
+VULKAN_AOS ?= 0
 GLSLANG  ?= glslangValidator
 BUILD    := build
 
@@ -92,8 +93,8 @@ $(BUILD)/backend_metal.o: src/backend_metal.mm $(HDRS) $(BUILD)/kernel_metal.inc
 	$(CXX) $(ALLFLAGS) -fobjc-arc -c -o $@ $<
 
 # The Vulkan kernel is compiled to SPIR-V here, one module per scratch mode, and embedded.
-$(BUILD)/kernel_vk_%.spv: src/kernel/entry_vulkan.comp $(KERNEL) | $(BUILD)
-	$(GLSLANG) -V --target-env vulkan1.1 -DCIP_SMODE=$* -Isrc/kernel -o $@ $<
+$(BUILD)/kernel_vk_%.spv: src/kernel/entry_vulkan.comp $(KERNEL) $(BUILD)/config | $(BUILD)
+	$(GLSLANG) -V --target-env vulkan1.1 -DCIP_SMODE=$* -DCIP_SCRATCH_AOS=$(VULKAN_AOS) -Isrc/kernel -o $@ $<
 
 $(BUILD)/kernel_vk.inc: $(BUILD)/kernel_vk_0.spv $(BUILD)/kernel_vk_1.spv $(BUILD)/kernel_vk_2.spv
 	cd $(BUILD) && { xxd -i kernel_vk_0.spv; xxd -i kernel_vk_1.spv; xxd -i kernel_vk_2.spv; } > kernel_vk.inc
@@ -112,7 +113,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 # Rebuild everything when the configuration (flags, backends) changes.
-CONFIG = $(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS)/$(NVCCFLAGS) rocm=$(ROCM)/$(ROCM_AOS)/$(HIPFLAGS) metal=$(METAL) vulkan=$(VULKAN)
+CONFIG = $(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS)/$(NVCCFLAGS) rocm=$(ROCM)/$(ROCM_AOS)/$(HIPFLAGS) metal=$(METAL) vulkan=$(VULKAN)/$(VULKAN_AOS)
 $(BUILD)/config: FORCE | $(BUILD)
 	@echo '$(CONFIG)' | cmp -s - $@ || echo '$(CONFIG)' > $@
 
@@ -133,7 +134,7 @@ $(BUILD)/sim_backend_cpu.o: src/backend_cpu.cpp $(HDRS) | $(BUILD)
 	$(CXX) $(ALLFLAGS) -UCIP_HAVE_METAL -UCIP_HAVE_VULKAN -UCIP_HAVE_ROCM -DCIP_HAVE_CUDA -c -o $@ $<
 
 $(BUILD)/sim_backend_cuda.o: src/backend_cuda.cu tests/cuda_sim.h $(HDRS) | $(BUILD)
-	$(CXX) $(ALLFLAGS) -DCIP_CUDA_SIM -include tests/cuda_sim.h -x c++ -c -o $@ $<
+	$(CXX) $(ALLFLAGS) -DCIP_CUDA_SIM -DCIP_SCRATCH_AOS=$(CUDA_AOS) -include tests/cuda_sim.h -x c++ -c -o $@ $<
 
 $(BUILD)/cipollino-cudasim: $(SIM_OBJS)
 	$(CXX) -o $@ $(SIM_OBJS) $(SODIUM_LIBS) -lpthread

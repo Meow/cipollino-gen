@@ -50,6 +50,21 @@ typedef uint64_t u64;
 #define CIP_HITCTR u32 *
 #define CIP_ATOMIC_INC(p) atomicAdd((p), 1u)
 
+#if defined(__NVCC__)
+// A 32x32->64 product, spelled in PTX. Written as (u64)a * (u64)b, nvcc hoists the
+// zero-extension of a loop-invariant operand out of the loop; inside the loop the product
+// is then a 64x64 multiply as far as ptxas can tell, and every one of them drags along an
+// add of the (zero) high word: 92 dead instructions per pair in the forward pass alone,
+// and 10% of the throughput of an RTX 4090.
+static __device__ __forceinline__ u64 cip_mul_wide(u32 a, u32 b)
+{
+    u64 r;
+    asm("mul.wide.u32 %0, %1, %2;" : "=l"(r) : "r"(a), "r"(b));
+    return r;
+}
+#define CIP_MUL(a, b) cip_mul_wide((a), (b))
+#endif
+
 #elif defined(CIP_TARGET_CPU)
 
 #include <stdint.h>
@@ -116,6 +131,17 @@ typedef uint64_t u64;
 // Scratch layout, chosen by the including backend (see search.h).
 #ifndef CIP_SCRATCH_AOS
 #define CIP_SCRATCH_AOS 0
+#endif
+
+// Whether the backward pass fetches scratch a pair ahead (see search.h). It pays where it
+// was measured to: 9% on an RTX 4090 under CUDA. The same card under Vulkan and an M5 Pro
+// under Metal lose about 1% to it.
+#ifndef CIP_FETCH_AHEAD
+#if defined(CIP_TARGET_CUDA)
+#define CIP_FETCH_AHEAD 1
+#else
+#define CIP_FETCH_AHEAD 0
+#endif
 #endif
 
 #define CIP_STATE_WORDS 20u  // per thread: x and y of its centre, 10 limbs each
