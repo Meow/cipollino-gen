@@ -139,6 +139,8 @@ Files are named after the public key and created with mode 0600. `--verify` and
 |---|---|---|
 | NVIDIA RTX 4090 | CUDA | 16.6 G |
 | NVIDIA RTX 4090, also driving a desktop | Vulkan | 14.5 - 15.3 G |
+| NVIDIA RTX 3090 | CUDA | 6.84 G |
+| NVIDIA RTX 3090 | Vulkan | 6.09 G |
 | NVIDIA RTX 2060 SUPER | CUDA | 2.83 G |
 | NVIDIA GTX 1650 SUPER | CUDA | 1.66 G |
 | Apple M5 Pro, first 20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
@@ -151,7 +153,8 @@ Files are named after the public key and created with mode 0600. `--verify` and
 
 Measured with `--bench`: the 4090 and the Radeon 610M in the container images, the 2060
 SUPER, the 1650 SUPER and the RX 6800 XT with the Windows programs, the RX 6700 XT under
-Linux. Not tested: Intel GPUs, and the Vulkan backend under Windows.
+Linux, the RTX 3090 as one GPU of a server. Not tested: Intel GPUs, and the Vulkan
+backend under Windows.
 
 The client key search needs fewer multiplications per key and runs 1.35 to 1.4 times as
 fast:
