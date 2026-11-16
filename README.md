@@ -116,14 +116,17 @@ nothing public depends on it.
 |---|---|---|
 | NVIDIA RTX 4090 | CUDA | 16.6 G |
 | NVIDIA RTX 4090, also driving a desktop | Vulkan | 14.5 - 15.3 G |
+| NVIDIA RTX 2060 SUPER | CUDA | 2.83 G |
+| NVIDIA GTX 1650 SUPER | CUDA | 1.66 G |
 | Apple M5 Pro, first 20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, heat-soaked | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU | 150 M |
 | AMD Radeon 610M (2 compute units) | ROCm 6.4 | 107 M |
 | AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M |
 
-Measured with `--bench`, the 4090 and the Radeon in the container images. Not tested:
-discrete AMD GPUs, Intel GPUs, and any GPU under Windows.
+Measured with `--bench`: the 4090 and the Radeon in the container images, the 2060
+SUPER and the 1650 SUPER with the Windows program. Not tested: discrete AMD GPUs, Intel
+GPUs, and AMD GPUs under Windows.
 
 Every extra character multiplies the work by 32:
 

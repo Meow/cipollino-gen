@@ -1,45 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="402" viewBox="0 0 760 402" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' role="img" aria-label="Keys tested per second by device and API">
-<rect x="0.5" y="0.5" width="759.0" height="401.0" rx="10" fill="#1a1a19" stroke="rgba(255,255,255,0.10)"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="458" viewBox="0 0 760 458" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' role="img" aria-label="Keys tested per second by device and API">
+<rect x="0.5" y="0.5" width="759.0" height="457.0" rx="10" fill="#1a1a19" stroke="rgba(255,255,255,0.10)"/>
 <text x="28.0" y="34.0" font-size="15" font-weight="600" text-anchor="start" fill="#f0efec">Keys tested per second</text>
 <text x="28.0" y="54.0" font-size="12" font-weight="400" text-anchor="start" fill="#c3c2b7">By device and API, measured with --bench. Each step on the axis is ten times the last.</text>
-<line x1="260.0" y1="78.0" x2="260.0" y2="352.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<text x="260.0" y="370.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">100 M</text>
-<line x1="400.0" y1="78.0" x2="400.0" y2="352.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<text x="400.0" y="370.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">1 G</text>
-<line x1="540.0" y1="78.0" x2="540.0" y2="352.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<text x="540.0" y="370.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">10 G</text>
-<text x="400.0" y="388.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">keys per second, logarithmic</text>
-<text x="28.0" y="95.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">NVIDIA RTX 4090</text>
-<text x="176.0" y="122.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">CUDA</text>
+<line x1="260.0" y1="78.0" x2="260.0" y2="408.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<text x="260.0" y="426.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">100 M</text>
+<line x1="400.0" y1="78.0" x2="400.0" y2="408.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<text x="400.0" y="426.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">1 G</text>
+<line x1="540.0" y1="78.0" x2="540.0" y2="408.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<text x="540.0" y="426.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">10 G</text>
+<text x="400.0" y="444.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">keys per second, logarithmic</text>
+<text x="28.0" y="95.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">NVIDIA</text>
+<text x="176.0" y="122.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">RTX 4090, CUDA</text>
 <line x1="190.0" y1="118.0" x2="610.0" y2="118.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
 <circle cx="570.8" cy="118.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
 <text x="582.8" y="122.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">16.6 G</text>
-<text x="176.0" y="150.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Vulkan</text>
+<text x="176.0" y="150.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">RTX 4090, Vulkan</text>
 <line x1="190.0" y1="146.0" x2="610.0" y2="146.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
 <line x1="562.6" y1="146.0" x2="565.9" y2="146.0" stroke="#1a1a19" stroke-width="14" stroke-linecap="round"/>
 <line x1="562.6" y1="146.0" x2="565.9" y2="146.0" stroke="#3987e5" stroke-width="10" stroke-linecap="round"/>
 <text x="577.9" y="150.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">14.5 to 15.3 G</text>
-<text x="28.0" y="177.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">Apple M5 Pro</text>
-<text x="176.0" y="204.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Metal, first 20 s</text>
-<line x1="190.0" y1="200.0" x2="610.0" y2="200.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<circle cx="432.3" cy="200.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-<text x="444.3" y="204.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">1.7 G</text>
-<text x="176.0" y="232.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Metal, heat-soaked</text>
-<line x1="190.0" y1="228.0" x2="610.0" y2="228.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<line x1="400.0" y1="228.0" x2="424.7" y2="228.0" stroke="#1a1a19" stroke-width="14" stroke-linecap="round"/>
-<line x1="400.0" y1="228.0" x2="424.7" y2="228.0" stroke="#3987e5" stroke-width="10" stroke-linecap="round"/>
-<text x="436.7" y="232.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">1.0 to 1.5 G</text>
-<text x="176.0" y="260.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">CPU, 18 cores</text>
+<text x="176.0" y="178.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">RTX 2060 SUPER, CUDA</text>
+<line x1="190.0" y1="174.0" x2="610.0" y2="174.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<circle cx="463.3" cy="174.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="475.3" y="178.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">2.83 G</text>
+<text x="176.0" y="206.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">GTX 1650 SUPER, CUDA</text>
+<line x1="190.0" y1="202.0" x2="610.0" y2="202.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<circle cx="430.8" cy="202.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="442.8" y="206.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">1.66 G</text>
+<text x="28.0" y="233.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">Apple M5 Pro</text>
+<text x="176.0" y="260.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Metal, first 20 s</text>
 <line x1="190.0" y1="256.0" x2="610.0" y2="256.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<circle cx="284.7" cy="256.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-<text x="296.7" y="260.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">150 M</text>
-<text x="28.0" y="287.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">AMD Radeon 610M</text>
-<text x="176.0" y="314.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">ROCm</text>
-<line x1="190.0" y1="310.0" x2="610.0" y2="310.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<circle cx="264.1" cy="310.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-<text x="276.1" y="314.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">107 M</text>
-<text x="176.0" y="342.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Vulkan</text>
-<line x1="190.0" y1="338.0" x2="610.0" y2="338.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<circle cx="253.6" cy="338.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-<text x="265.6" y="342.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">90 M</text>
+<circle cx="432.3" cy="256.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="444.3" y="260.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">1.7 G</text>
+<text x="176.0" y="288.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Metal, heat-soaked</text>
+<line x1="190.0" y1="284.0" x2="610.0" y2="284.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<line x1="400.0" y1="284.0" x2="424.7" y2="284.0" stroke="#1a1a19" stroke-width="14" stroke-linecap="round"/>
+<line x1="400.0" y1="284.0" x2="424.7" y2="284.0" stroke="#3987e5" stroke-width="10" stroke-linecap="round"/>
+<text x="436.7" y="288.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">1.0 to 1.5 G</text>
+<text x="176.0" y="316.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">CPU, 18 cores</text>
+<line x1="190.0" y1="312.0" x2="610.0" y2="312.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<circle cx="284.7" cy="312.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="296.7" y="316.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">150 M</text>
+<text x="28.0" y="343.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">AMD Radeon 610M</text>
+<text x="176.0" y="370.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">ROCm</text>
+<line x1="190.0" y1="366.0" x2="610.0" y2="366.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<circle cx="264.1" cy="366.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="276.1" y="370.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">107 M</text>
+<text x="176.0" y="398.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Vulkan</text>
+<line x1="190.0" y1="394.0" x2="610.0" y2="394.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
+<circle cx="253.6" cy="394.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="265.6" y="398.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">90 M</text>
 </svg>

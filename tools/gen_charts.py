@@ -61,7 +61,8 @@ class Svg:
 def speed(t):
     """Keys per second by device and API: positions on a log axis, ranges as two joined dots."""
     groups = [
-        ("NVIDIA RTX 4090", [("CUDA", 16.6e9, None, "16.6 G"), ("Vulkan", 14.5e9, 15.3e9, "14.5 to 15.3 G")]),
+        ("NVIDIA", [("RTX 4090, CUDA", 16.6e9, None, "16.6 G"), ("RTX 4090, Vulkan", 14.5e9, 15.3e9, "14.5 to 15.3 G"),
+                    ("RTX 2060 SUPER, CUDA", 2.83e9, None, "2.83 G"), ("GTX 1650 SUPER, CUDA", 1.66e9, None, "1.66 G")]),
         ("Apple M5 Pro", [("Metal, first 20 s", 1.7e9, None, "1.7 G"), ("Metal, heat-soaked", 1.0e9, 1.5e9, "1.0 to 1.5 G"),
                           ("CPU, 18 cores", 150e6, None, "150 M")]),
         ("AMD Radeon 610M", [("ROCm", 107e6, None, "107 M"), ("Vulkan", 90e6, None, "90 M")]),

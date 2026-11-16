@@ -150,6 +150,10 @@ block size all sit within a few percent. What matters:
 - `lean` scratch: 16.6 G keys/s against 15.0 for `half` and 13.9 for `full`, which
   saturates the memory bus.
 
+Older cards are slower per multiprocessor: an RTX 2060 SUPER (34 of them) and a GTX 1650
+SUPER (20) both do 83 M keys/s on each, the 4090 130 M. Both are fastest in `half`
+scratch, by 2 to 7% over `lean`.
+
 **Vulkan on NVIDIA.** The kernel is as fast as the CUDA one, but NVIDIA's driver cannot
 cheaply preempt a running Vulkan compute dispatch. When a compositor wants to draw, the
 dispatch in flight continues at about 1/17 of its speed until it ends, and one that then
