@@ -2,7 +2,7 @@
 #
 # Started by hand: Actions -> Release -> Run workflow, on the branch to release. The
 # release is tagged v<VERSION>, from that commit's VERSION file. Nothing is compiled here:
-# the Windows program comes from the "Windows build" run of that very commit, so what is
+# the programs come from the "Programs" run of that very commit (build.yml), so what is
 # released is what was tested. The release stays a draft until you publish it; only then
 # is its tag created, which in turn builds the container images for that version.
 
@@ -36,24 +36,35 @@ jobs:
           fi
           echo "TAG=v$version" >> "$GITHUB_ENV"
 
-      - name: Find the Windows build of this commit
+      - name: Find the programs built from this commit
         id: build
         run: |
           run=$(gh api "repos/$GH_REPO/actions/runs?head_sha=$GITHUB_SHA&status=success&per_page=100" \
-                  --jq '[.workflow_runs[] | select(.path == ".github/workflows/windows.yml")][0].id // empty')
+                  --jq '[.workflow_runs[] | select(.path == ".github/workflows/build.yml")][0].id // empty')
           if [ -z "$run" ]; then
-            echo "::error::No successful Windows build of $GITHUB_SHA: run the Windows build on this commit first."
+            echo "::error::No successful Programs run of $GITHUB_SHA: every program has to build first."
             exit 1
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch and pack it
+      # Artifacts do not keep file modes, so the programs are made executable again.
+      # Windows gets a zip, the others a tarball.
+      - name: Fetch and pack them
         env:
           RUN: ${{ steps.build.outputs.run }}
         run: |
-          gh run download "$RUN" --name cipollino-windows-x64 --dir "cipollino-$TAG-windows-x64"
+          gh run download "$RUN" --dir artifacts
           mkdir assets
-          zip -r "assets/cipollino-$TAG-windows-x64.zip" "cipollino-$TAG-windows-x64"
+          for dir in artifacts/cipollino-*; do
+            name="cipollino-$TAG-${dir#artifacts/cipollino-}"
+            mv "$dir" "$name"
+            case "$name" in
+              *windows*) zip -r "assets/$name.zip" "$name" ;;
+              *) chmod +x "$name/cipollino" && tar -czf "assets/$name.tar.gz" "$name" ;;
+            esac
+          done
+          ls -l assets
+          [ "$(ls assets | wc -l)" -eq 5 ] || { echo "::error::expected five programs"; exit 1; }
           (cd assets && sha256sum -- * > SHA256SUMS)
 
       - name: Create the draft

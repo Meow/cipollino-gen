@@ -1,7 +1,7 @@
-# cipollino, built with CMake. This is how the Windows version is built (MSVC, with
-# vcpkg.json supplying libsodium, the Vulkan headers and glslang). It works on Linux and
-# macOS too, but there the Makefile is the reference: only it builds the ROCm and Metal
-# backends and the container images.
+# cipollino, built with CMake. This is how the Windows versions are built (with vcpkg.json
+# supplying libsodium, the Vulkan headers and glslang). It works on Linux and macOS too,
+# but there the Makefile is the reference: only it builds the Metal backend and the
+# container images.
 #
 #   cmake -B build [-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake]
 #   cmake --build build
@@ -9,6 +9,10 @@
 #   ctest --test-dir build -L gpu       every GPU backend in this build, on the real device
 #
 #   -DCIP_CUDA=ON|OFF|AUTO     CUDA backend (AUTO: if nvcc is found)
+#   -DCIP_ROCM=ON              ROCm backend instead of CUDA. The C++ compiler has to be
+#                              ROCm's clang++ (-DCMAKE_CXX_COMPILER=<rocm>/lib/llvm/bin/clang++)
+#                              and -DCIP_ROCM_PATH or HIP_PATH name the ROCm installation
+#   -DCIP_ROCM_ARCH="gfx11-generic;gfx1036"   AMD GPU architectures to generate code for
 #   -DCIP_VULKAN=ON|OFF|AUTO   Vulkan backend (AUTO: if the headers and glslang are found)
 #   -DCIP_CUDA_ARCH=sm_86      GPU generation to compile for instead of the one in this
 #                              machine; `all` for a binary that runs on every NVIDIA GPU
@@ -20,6 +24,11 @@ set(CIP_CUDA AUTO CACHE STRING "CUDA backend: ON, OFF or AUTO")
 set(CIP_VULKAN AUTO CACHE STRING "Vulkan backend: ON, OFF or AUTO")
 set(CIP_CUDA_ARCH native CACHE STRING "nvcc -arch: native, all, all-major or sm_NN")
 set(CIP_CUDA_AOS 1 CACHE STRING "CUDA scratch layout")
+set(CIP_ROCM OFF CACHE BOOL "ROCm backend (instead of CUDA)")
+set(CIP_ROCM_PATH "$ENV{HIP_PATH}" CACHE PATH "ROCm installation")
+set(CIP_ROCM_ARCH "gfx9-generic;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"
+    CACHE STRING "AMD GPU architectures to generate code for")
+set(CIP_ROCM_AOS 1 CACHE STRING "ROCm scratch layout")
 set(CIP_VULKAN_AOS 1 CACHE STRING "Vulkan scratch layout")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -38,10 +47,10 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # A statically linked C runtime when the libraries were built that way (vcpkg's
 # x64-windows-static): the program is then a single file with no redistributable to install.
-if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$")
+if(WIN32 AND VCPKG_TARGET_TRIPLET MATCHES "-static$")
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-if(MSVC)
+if(WIN32)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 add_compile_options(
@@ -72,6 +81,42 @@ set(cip_backend_libraries "")
 set(cip_gpu_backends "")
 set(cip_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(cip_kernel src/kernel/defs.h src/kernel/field.h src/kernel/field13.h src/kernel/search.h)
+
+set(cip_backend_includes "")
+set(cip_backend_link_options "")
+
+# ROCm: backend_cuda.cu compiled as HIP by ROCm's clang++, which is then the compiler of
+# everything else too. One program has CUDA or ROCm, as the two are the same source file.
+if(CIP_ROCM)
+  file(TO_CMAKE_PATH "${CIP_ROCM_PATH}" CIP_ROCM_PATH)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR NOT EXISTS "${CIP_ROCM_PATH}/include/hip/hip_runtime.h")
+    message(FATAL_ERROR "CIP_ROCM needs ROCm's clang++ as CMAKE_CXX_COMPILER and its installation in CIP_ROCM_PATH (or HIP_PATH)")
+  endif()
+  set(CIP_CUDA OFF)
+  find_library(CIP_HIP_LIBRARY NAMES amdhip64 amdhip64_7 amdhip64_6 PATHS "${CIP_ROCM_PATH}/lib" NO_DEFAULT_PATH REQUIRED)
+  set(cip_hip_options -xhip "--rocm-path=${CIP_ROCM_PATH}" -Wno-pass-failed)
+  foreach(arch ${CIP_ROCM_ARCH})
+    list(APPEND cip_hip_options "--offload-arch=${arch}")
+  endforeach()
+  set_source_files_properties(src/backend_cuda.cu PROPERTIES LANGUAGE CXX
+    COMPILE_DEFINITIONS "CIP_ROCM;CIP_SCRATCH_AOS=${CIP_ROCM_AOS}"
+    COMPILE_OPTIONS "${cip_hip_options}")
+  list(APPEND cip_backend_sources src/backend_cuda.cu)
+  list(APPEND cip_backend_definitions CIP_HAVE_ROCM)
+  list(APPEND cip_backend_includes "${CIP_ROCM_PATH}/include")
+  list(APPEND cip_backend_libraries "${CIP_HIP_LIBRARY}")
+  list(APPEND cip_gpu_backends rocm)
+  if(WIN32)
+    # The HIP runtime comes with the AMD driver. Loaded on first use, so that the
+    # program also starts on a machine without one (backend_cuda.cu checks for it).
+    file(GLOB cip_hip_dll "${CIP_ROCM_PATH}/bin/amdhip64*.dll")
+    list(GET cip_hip_dll 0 cip_hip_dll)
+    get_filename_component(cip_hip_dll "${cip_hip_dll}" NAME)
+    list(APPEND cip_backend_definitions "CIP_HIP_DLL=\"${cip_hip_dll}\"")
+    list(APPEND cip_backend_link_options "LINKER:/delayload:${cip_hip_dll}")
+    list(APPEND cip_backend_libraries delayimp)
+  endif()
+endif()
 
 if(CIP_CUDA STREQUAL "AUTO" OR CIP_CUDA)
   # The architecture flag is ours (CIP_CUDA_ARCH), as in the Makefile.
@@ -154,8 +199,9 @@ target_link_libraries(cipcore PUBLIC ${cip_sodium} Threads::Threads)
 
 add_executable(cipollino src/main.cpp ${cip_backend_sources})
 target_compile_definitions(cipollino PRIVATE ${cip_backend_definitions})
-target_include_directories(cipollino PRIVATE "${cip_generated}")
+target_include_directories(cipollino PRIVATE "${cip_generated}" ${cip_backend_includes})
 target_link_libraries(cipollino PRIVATE cipcore ${cip_backend_libraries})
+target_link_options(cipollino PRIVATE ${cip_backend_link_options})
 # No CUDA runtime DLL to ship: only the driver's own library is needed, and only when a
 # CUDA device is actually used.
 set_target_properties(cipollino PROPERTIES CUDA_RUNTIME_LIBRARY Static)

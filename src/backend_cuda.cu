@@ -37,6 +37,15 @@
 
 #include "backend.h"
 
+// On Windows the HIP runtime is a DLL of the AMD driver, linked to load on first use.
+#if defined(CIP_ROCM) && defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #define CIP_TARGET_CUDA
 #include "kernel/defs.h"
 #include "kernel/field.h"
@@ -228,6 +237,12 @@ private:
 std::vector<std::unique_ptr<Backend>> CIP_CREATE(const std::vector<int> &devices, std::string &err)
 {
     std::vector<std::unique_ptr<Backend>> v;
+#if defined(CIP_ROCM) && defined(_WIN32)
+    if (!LoadLibraryA(CIP_HIP_DLL)) {
+        err = "no ROCm runtime (" CIP_HIP_DLL ") on this machine: it comes with a current AMD graphics driver";
+        return v;
+    }
+#endif
     int count = 0;
     cudaError_t e = cudaGetDeviceCount(&count);
     if (e != cudaSuccess || count <= 0) {

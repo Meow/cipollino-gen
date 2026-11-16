@@ -31,17 +31,32 @@ faster.
 
 ## Install
 
-| system | get it |
-|---|---|
-| Windows | `cipollino-<version>-windows-x64.zip` from [Releases](https://github.com/Meow/cipollino-gen/releases): one program with CUDA, Vulkan and CPU |
-| Linux, NVIDIA | `ghcr.io/meow/cipollino-gen` (CUDA, Vulkan) |
-| Linux, AMD | `ghcr.io/meow/cipollino-gen:rocm` (ROCm, Vulkan) |
-| macOS, anything else | [build it](#building) |
+Programs from [Releases](https://github.com/Meow/cipollino-gen/releases), each one file
+plus this README:
 
-The images need only Docker and the GPU driver on the host (plus
-nvidia-container-toolkit for NVIDIA). `latest` and `rocm` follow the main branch;
-`<version>` and `<version>-rocm` are the releases. `cipollino-docker` from this repository runs one
-as you, with `./keys` mounted and every GPU passed through:
+| download | backends | needs |
+|---|---|---|
+| `…-windows-x64-cuda.zip` | CUDA, Vulkan, CPU | an NVIDIA driver for CUDA; any GPU driver for Vulkan |
+| `…-windows-x64-rocm.zip` | ROCm, Vulkan, CPU | a current AMD driver, which brings the HIP runtime |
+| `…-linux-x64-cuda.tar.gz` | CUDA, Vulkan, CPU | glibc 2.35 or later, an NVIDIA driver |
+| `…-linux-x64-rocm.tar.gz` | ROCm, Vulkan, CPU | glibc 2.35 or later, ROCm 6 in `/opt/rocm` |
+| `…-macos-arm64.tar.gz` | Metal, CPU | macOS 14 or later, Apple silicon |
+
+Every one of them starts without its GPU and then uses what it finds, down to the CPU.
+The macOS program is not signed: after unpacking, `xattr -d com.apple.quarantine
+cipollino` lets it run.
+
+Container images, which need only Docker and the GPU driver on the host (plus
+nvidia-container-toolkit for NVIDIA):
+
+| image | backends |
+|---|---|
+| `ghcr.io/meow/cipollino-gen` | CUDA, Vulkan |
+| `ghcr.io/meow/cipollino-gen:rocm` | ROCm, Vulkan, with the ROCm runtime inside |
+
+`latest` and `rocm` follow the main branch; `<version>` and `<version>-rocm` are the
+releases. `cipollino-docker` from this repository runs one as you, with `./keys` mounted
+and every GPU passed through:
 
 ```
 CIPOLLINO_IMAGE=ghcr.io/meow/cipollino-gen ./cipollino-docker -n 2 someprefix
@@ -141,7 +156,7 @@ of that backend's GPUs. Backends are never mixed, as that would drive one GPU tw
   preempt a Vulkan compute dispatch cheaply: when the desktop wants to draw, the dispatch
   in flight crawls until it ends, and a long one gets the device reset. The Vulkan
   backend keeps launches on NVIDIA to 50 ms for that reason.
-- **AMD:** ROCm where it supports the GPU, Vulkan elsewhere (and always on Windows).
+- **AMD:** ROCm where it supports the GPU, Vulkan elsewhere.
 - **Apple:** Metal. A laptop is thermally limited within a minute; High Power mode
   raises the sustained rate.
 
@@ -236,14 +251,16 @@ make
 
 The CUDA build targets the build machine's GPU; `make CUDA_ARCH=sm_75` names another
 generation and `CUDA_ARCH=all` every one. The ROCm build takes its targets from
-`ROCM_ARCH`, e.g. `make ROCM_ARCH=gfx11-generic`.
+`ROCM_ARCH`, e.g. `make ROCM_ARCH=gfx11-generic`. `make PORTABLE=1` links libsodium, the
+C++ library and the CUDA runtime in and opens the Vulkan loader at run time; that is how
+the released Linux and macOS programs are built.
 
 ### Windows
 
 Built with CMake and Visual Studio 2022; `vcpkg.json` lists the libraries. The result is
 one `cipollino.exe` with CUDA, Vulkan and CPU. CUDA needs only the NVIDIA driver at run
 time and Vulkan only the loader that GPU drivers install; with neither, the program runs
-on the CPU. There is no ROCm backend on Windows.
+on the CPU.
 
 ```
 :: in an "x64 Native Tools Command Prompt"; install the CUDA toolkit first for that backend
@@ -252,6 +269,20 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCIP_CUDA_ARCH=all
 cmake --build build
 ctest --test-dir build
+```
+
+The ROCm program has ROCm instead of CUDA and is compiled by ROCm's own clang++, which
+comes as Python wheels:
+
+```
+python -m venv C:\rocm
+C:\rocm\Scripts\pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[devel]==10.0.0"
+C:\rocm\Scripts\rocm-sdk init
+for /f %i in ('C:\rocm\Scripts\rocm-sdk path --root') do set HIP_PATH=%i
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
+  -DCMAKE_CXX_COMPILER=%HIP_PATH%\lib\llvm\bin\clang++.exe -DCIP_ROCM=ON
 ```
 
 ### Docker
@@ -294,7 +325,7 @@ make docker-rocm-test   # ROCm and Vulkan
 The version is the content of [`VERSION`](VERSION) and what `cipollino --version` prints;
 [CHANGELOG.md](CHANGELOG.md) lists what each one changed. To release: raise `VERSION`,
 add the changelog entry, and run the Release workflow on that commit. It drafts
-`v<version>` with the Windows program CI built from the commit; publishing the draft
+`v<version>` with the five programs CI built from the commit; publishing the draft
 creates the tag, which builds the `<version>` and `<version>-rocm` images.
 
 ## License

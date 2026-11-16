@@ -10,6 +10,8 @@
 #                   1 = a thread's slot is contiguous (the default), 0 = one word per thread
 #                   side by side. Compare with --bench.
 #   make ROCM_ARCH="gfx1100 gfx1030"   AMD GPU architectures to generate code for
+#   make PORTABLE=1   a program to hand to other machines: libsodium, the C++ library and
+#                   the CUDA runtime linked in, the Vulkan loader opened at run time
 
 CXX      ?= c++
 CXXFLAGS ?= -O2
@@ -21,6 +23,7 @@ HIPCC    ?= $(firstword $(shell command -v hipcc 2>/dev/null) $(wildcard $(ROCM_
 ROCM_ARCH ?=
 ROCM_AOS ?= 1
 VULKAN_AOS ?= 1
+PORTABLE ?= 0
 GLSLANG  ?= glslangValidator
 BUILD    := build
 
@@ -54,6 +57,19 @@ FIELD13 := src/kernel/field13.h
 HDRS   := $(wildcard src/*.h) $(KERNEL) $(FIELD13) $(BUILD)/config
 OBJS   := $(addprefix $(BUILD)/,main.o engine.o keys.o onion.o ed.o filter.o platform.o backend_cpu.o)
 
+ifeq ($(PORTABLE),1)
+SODIUM_LIBS := $(firstword $(wildcard $(SODIUM_PREFIX)/lib/libsodium.a $(shell pkg-config --variable=libdir libsodium 2>/dev/null)/libsodium.a))
+ifeq ($(SODIUM_LIBS),)
+$(error PORTABLE=1 needs the static libsodium (libsodium.a))
+endif
+LDLIBS := $(SODIUM_LIBS) -lpthread
+VULKAN_LIBS := -ldl
+DEFS   += -DCIP_VULKAN_DYNAMIC=1
+ifneq ($(UNAME),Darwin)
+LDLIBS += -static-libstdc++ -static-libgcc
+endif
+endif
+
 ifeq ($(METAL),1)
 DEFS   += -DCIP_HAVE_METAL
 OBJS   += $(BUILD)/backend_metal.o
@@ -77,7 +93,12 @@ ifeq ($(CUDA),1)
 DEFS      += -DCIP_HAVE_CUDA
 OBJS      += $(BUILD)/backend_cuda.o
 NVCCFLAGS ?= -O3 -arch=$(CUDA_ARCH)
+ifeq ($(PORTABLE),1)
+CUDA_PATH ?= $(abspath $(dir $(shell command -v $(NVCC)))/..)
+LDLIBS    += -L$(CUDA_PATH)/lib64 -lcudart_static -ldl -lrt
+else
 LINK      := $(NVCC)
+endif
 endif
 
 all: cipollino
@@ -124,7 +145,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 # Rebuild everything when the configuration (flags, backends) changes.
-CONFIG = $(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS)/$(NVCCFLAGS) rocm=$(ROCM)/$(ROCM_AOS)/$(HIPFLAGS) metal=$(METAL) vulkan=$(VULKAN)/$(VULKAN_AOS)
+CONFIG = $(CXX) $(ALLFLAGS) cuda=$(CUDA)/$(CUDA_AOS)/$(NVCCFLAGS) rocm=$(ROCM)/$(ROCM_AOS)/$(HIPFLAGS) metal=$(METAL) vulkan=$(VULKAN)/$(VULKAN_AOS) portable=$(PORTABLE)
 $(BUILD)/config: FORCE | $(BUILD)
 	@echo '$(CONFIG)' | cmp -s - $@ || echo '$(CONFIG)' > $@
 

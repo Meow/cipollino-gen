@@ -1,0 +1,280 @@
+# Builds the programs a release carries, one job each:
+#
+#   cipollino-windows-x64-cuda   CUDA, Vulkan, CPU    MSVC and nvcc through CMake
+#   cipollino-windows-x64-rocm   ROCm, Vulkan, CPU    ROCm's clang++ through CMake
+#   cipollino-linux-x64-cuda     CUDA, Vulkan, CPU    make PORTABLE=1 on Ubuntu 22.04
+#   cipollino-linux-x64-rocm     ROCm, Vulkan, CPU    make PORTABLE=1 on Ubuntu 22.04
+#   cipollino-macos-arm64        Metal, CPU           make PORTABLE=1
+#
+# The runners have no GPU, so what is tested here is everything that needs none: the field
+# arithmetic, the CPU backend, the CUDA backend's host code on a simulated runtime, and
+# that each program starts and falls back to the CPU on a machine without its GPU.
+# Each program is kept as a workflow artifact; the Release workflow attaches them.
+
+name: Programs
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: programs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The same toolkits as the container images (Dockerfile, Dockerfile.rocm).
+  CUDA_VERSION: '12.6.3'
+
+jobs:
+  windows-cuda:
+    name: Windows, CUDA
+    # Visual Studio 2022: the CUDA 12 compiler refuses anything newer.
+    runs-on: windows-2022
+    env:
+      VCPKG_TRIPLET: x64-windows-static
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the Visual Studio command line
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install the CUDA compiler
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: network
+          sub-packages: '["nvcc", "cudart"]'
+
+      - name: Cache the vcpkg packages
+        uses: actions/cache@v6
+        with:
+          path: vcpkg-cache
+          key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vcpkg-cache | Out-Null
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TRIPLET" `
+            -DCIP_CUDA=ON -DCIP_VULKAN=ON -DCIP_CUDA_ARCH=all
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE gpu
+
+      - name: Check that it runs without a GPU driver
+        shell: pwsh
+        run: |
+          dumpbin /dependents build\cipollino.exe
+          build\cipollino.exe --bench 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item build\cipollino.exe, README.md, CHANGELOG.md, LICENSE dist\
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-windows-x64-cuda
+          path: dist/
+          if-no-files-found: error
+
+  windows-rocm:
+    name: Windows, ROCm
+    runs-on: windows-2022
+    env:
+      ROCM_VERSION: '10.0.0'
+      VCPKG_TRIPLET: x64-windows-static
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v7
+
+      # For the linker and the Windows SDK; the compiler is ROCm's clang++.
+      - name: Set up the Visual Studio command line
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install the ROCm compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m venv C:\rocm
+          C:\rocm\Scripts\python -m pip install --quiet --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[devel]==$env:ROCM_VERSION"
+          C:\rocm\Scripts\rocm-sdk init
+          if ($LASTEXITCODE -ne 0) { throw "rocm-sdk init failed" }
+          $root = (C:\rocm\Scripts\rocm-sdk path --root).Trim()
+          $bin = (C:\rocm\Scripts\rocm-sdk path --bin).Trim()
+          "HIP_PATH=$root" >> $env:GITHUB_ENV
+          if (Test-Path "$root\lib\llvm\amdgcn\bitcode") { "HIP_DEVICE_LIB_PATH=$root\lib\llvm\amdgcn\bitcode" >> $env:GITHUB_ENV }
+          $bin >> $env:GITHUB_PATH
+          & "$root\lib\llvm\bin\clang++.exe" --version
+          Get-ChildItem "$bin\amdhip64*.dll" | Format-Table Name, Length
+
+      - name: Cache the vcpkg packages
+        uses: actions/cache@v6
+        with:
+          path: vcpkg-cache
+          key: vcpkg-${{ env.VCPKG_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vcpkg-cache | Out-Null
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TRIPLET" `
+            "-DCMAKE_CXX_COMPILER=$env:HIP_PATH\lib\llvm\bin\clang++.exe" `
+            -DCIP_ROCM=ON -DCIP_VULKAN=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE gpu
+
+      # With the HIP runtime on PATH (as on a machine with an AMD driver, but no AMD GPU
+      # here), and without it (as on any other machine).
+      - name: Check that it runs without an AMD GPU and without the HIP runtime
+        shell: pwsh
+        run: |
+          dumpbin /dependents build\cipollino.exe
+          build\cipollino.exe --bench 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*rocm*' }) -join ';'
+          build\cipollino.exe --bench 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item build\cipollino.exe, README.md, CHANGELOG.md, LICENSE dist\
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-windows-x64-rocm
+          path: dist/
+          if-no-files-found: error
+
+  linux-cuda:
+    name: Linux, CUDA
+    runs-on: ubuntu-latest
+    # Ubuntu 22.04, so that the program runs wherever glibc is 2.35 or newer.
+    container: nvidia/cuda:12.6.3-base-ubuntu22.04
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cuda-nvcc-12-6 cuda-cudart-dev-12-6 \
+            g++ make pkg-config libsodium-dev python3 libvulkan-dev glslang-tools xxd
+          echo /usr/local/cuda/bin >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: make -j"$(nproc)" PORTABLE=1 CUDA_ARCH=all
+
+      - name: Test
+        run: make test-host PORTABLE=1 CUDA_ARCH=all
+
+      - name: Check that it needs only the C library and runs without a GPU
+        run: |
+          ldd cipollino
+          ! ldd cipollino | grep -Ev 'linux-vdso|ld-linux|libc\.so|libm\.so'
+          ./cipollino --bench 2
+
+      - name: Package
+        run: mkdir dist && cp cipollino README.md CHANGELOG.md LICENSE dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-linux-x64-cuda
+          path: dist/
+          if-no-files-found: error
+
+  linux-rocm:
+    name: Linux, ROCm
+    runs-on: ubuntu-latest
+    container: rocm/dev-ubuntu-22.04:6.4.4
+    env:
+      # One code object per GPU family, as in Dockerfile.rocm.
+      ROCM_ARCH: gfx9-generic gfx9-4-generic gfx10-1-generic gfx10-3-generic gfx11-generic gfx12-generic
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            g++ make pkg-config libsodium-dev python3 libvulkan-dev glslang-tools xxd
+
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: make -j"$(nproc)" PORTABLE=1 ROCM_ARCH="$ROCM_ARCH"
+
+      - name: Test
+        run: make test-host PORTABLE=1 ROCM_ARCH="$ROCM_ARCH"
+
+      # Apart from the C library it may need the HIP runtime, which is the ROCm
+      # installation of the machine it runs on.
+      - name: Check what it needs and that it runs without a GPU
+        run: |
+          ldd cipollino
+          readelf -d cipollino | grep NEEDED
+          ! readelf -d cipollino | grep NEEDED | grep -Ev 'libamdhip64|libc\.so|libm\.so'
+          ./cipollino --bench 2
+
+      - name: Package
+        run: mkdir dist && cp cipollino README.md CHANGELOG.md LICENSE dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-linux-x64-rocm
+          path: dist/
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install libsodium
+        run: brew install libsodium
+
+      # Metal and the CPU. Vulkan is left out: MoltenVK is not part of macOS.
+      - name: Build
+        run: make -j"$(sysctl -n hw.ncpu)" PORTABLE=1 VULKAN=0
+
+      - name: Test
+        run: make test-host PORTABLE=1 VULKAN=0
+
+      - name: Check that it needs only the system and runs
+        run: |
+          otool -L cipollino
+          ! otool -L cipollino | tail -n +2 | grep -Ev '/usr/lib/|/System/Library/'
+          ./cipollino --bench 2
+
+      - name: Package
+        run: mkdir dist && cp cipollino README.md CHANGELOG.md LICENSE dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cipollino-macos-arm64
+          path: dist/
+          if-no-files-found: error
