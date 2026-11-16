@@ -148,11 +148,11 @@ if(CIP_VULKAN STREQUAL "AUTO" OR CIP_VULKAN)
     HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/glslang" ENV VULKAN_SDK
     PATH_SUFFIXES bin Bin)
   if(cip_vulkan AND CIP_GLSLANG)
-    # The kernel compiled to SPIR-V and embedded as C arrays: one module per scratch mode
-    # for each field arithmetic (w: wide, n: narrow).
+    # The kernel compiled to SPIR-V and embedded as C arrays: one module per variant of the
+    # loop (CIP_SCRATCH_*) for each field arithmetic (w: wide, n: narrow).
     set(cip_spirv "")
     foreach(arith 0 1)
-      foreach(mode 0 1 2)
+      foreach(mode 0 1 2 3)
         if(arith)
           set(spv "${cip_generated}/kernel_vk_n${mode}.spv")
         else()

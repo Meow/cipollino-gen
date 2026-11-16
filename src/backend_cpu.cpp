@@ -16,7 +16,7 @@
 uint64_t scratch_bytes(uint32_t nthreads, uint32_t npairs, uint32_t smode)
 {
     uint64_t slots = smode == CIP_SCRATCH_FULL ? 2 * (uint64_t)npairs
-                   : smode == CIP_SCRATCH_LEAN ? (uint64_t)npairs : (uint64_t)npairs / 2;
+                   : smode == CIP_SCRATCH_HALF ? (uint64_t)npairs / 2 : (uint64_t)npairs;
     return slots * 8 * 4 * nthreads;
 }
 
@@ -137,7 +137,9 @@ private:
     {
         uint32_t *state = state_.data(), *scratch = scratch_.data(), *hits = hits_.data();
         const uint32_t *table = table_.data(), *filt = filt_.data(), *bitmap = bitmap_.data();
-        if (smode_ == CIP_SCRATCH_FULL)
+        if (smode_ == CIP_SCRATCH_X25519)
+            cip_search_thread<CIP_SCRATCH_X25519>(tid, prm_ CIP_BUFS);
+        else if (smode_ == CIP_SCRATCH_FULL)
             cip_search_thread<CIP_SCRATCH_FULL>(tid, prm_ CIP_BUFS);
         else if (smode_ == CIP_SCRATCH_LEAN)
             cip_search_thread<CIP_SCRATCH_LEAN>(tid, prm_ CIP_BUFS);

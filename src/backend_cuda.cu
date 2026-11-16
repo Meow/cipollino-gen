@@ -114,7 +114,7 @@ public:
     void configure(uint32_t nthreads, uint32_t npairs, uint32_t smode, const std::vector<uint32_t> &table) override
     {
         use();
-        if (smode > CIP_SCRATCH_FULL) throw std::runtime_error("bad scratch mode");
+        if (smode > CIP_SCRATCH_X25519) throw std::runtime_error("bad scratch mode");
         for (u32 **p : {&state_, &table_, &scratch_}) {
             if (*p) check(cudaFree(*p), "cudaFree");
             *p = nullptr;
@@ -173,7 +173,9 @@ public:
         prm_.count = count;
         check(cudaMemset(hitctr_, 0, 4), "cudaMemset");
         unsigned grid = (prm_.nthreads + kBlock - 1) / kBlock;
-        if (smode_ == CIP_SCRATCH_FULL)
+        if (smode_ == CIP_SCRATCH_X25519)
+            CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_X25519>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
+        else if (smode_ == CIP_SCRATCH_FULL)
             CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_FULL>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);
         else if (smode_ == CIP_SCRATCH_LEAN)
             CIP_LAUNCH(CIP_KERNEL<CIP_SCRATCH_LEAN>, grid, kBlock, state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_, prm_);

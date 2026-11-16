@@ -28,6 +28,18 @@ struct Key {
     Key &operator=(const Key &) = delete;
 };
 
+// An x25519 key pair for client authorization. The private key is the same kind of scalar,
+// which x25519 uses as it is.
+struct ClientKey {
+    uint8_t sk[32];
+    uint8_t pk[32];
+    std::string text;  // the public key in base32: 52 characters, lower case
+    ClientKey();
+    ~ClientKey();  // wipes sk
+    ClientKey(const ClientKey &) = delete;
+    ClientKey &operator=(const ClientKey &) = delete;
+};
+
 // Fresh seed from the OS CSPRNG.
 void random_seed(uint8_t seed[32]);
 
@@ -47,6 +59,30 @@ bool public_key(uint8_t pk[32], const uint8_t seed[32], Offset m);
 // On failure `why` says which check failed.
 bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std::string> &prefixes,
               std::string &why);
+
+// The x25519 public key for seed + offset. Returns false as public_key does.
+bool client_public_key(uint8_t pk[32], const uint8_t seed[32], Offset m);
+
+// Derive the x25519 key pair for seed + offset and validate it, independently of anything
+// the GPU computed:
+//   - the private key is a clamped scalar, so x25519 uses exactly these 32 bytes,
+//   - the public key is recomputed from it, and is the Montgomery form of the Ed25519
+//     public key of the same scalar,
+//   - a key exchange with a throwaway key pair gives both sides the same secret,
+//   - the public key in base32 starts with one of `prefixes`.
+bool finalize_client(ClientKey &out, const uint8_t seed[32], Offset m, const std::vector<std::string> &prefixes,
+                     std::string &why);
+
+// Write the pair as Tor takes it, named after the public key in upper-case base32 (`name`):
+//   <dir>/<name>.auth          "descriptor:x25519:<public key>", for the service's
+//                              authorized_clients directory
+//   <dir>/<name>.auth_private  "<service>:descriptor:x25519:<private key>", for the
+//                              client's ClientOnionAuthDir, if `service` (an onion address
+//                              without ".onion") is given; otherwise
+//   <dir>/<name>.private       the private key in base32 alone
+// Files are created 0600 and never overwritten. Returns false with a message in `err`.
+bool write_client_key(const std::string &dir, const ClientKey &key, const std::string &service, std::string &name,
+                      std::string &err);
 
 // Write <dir>/<address>.onion/{hostname,hs_ed25519_public_key,hs_ed25519_secret_key} in the
 // layout Tor's HiddenServiceDir expects (directory 0700, secret key 0600; on Windows they

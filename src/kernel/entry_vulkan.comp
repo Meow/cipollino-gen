@@ -2,8 +2,8 @@
 #extension GL_ARB_gpu_shader_int64 : require
 #extension GL_GOOGLE_include_directive : require
 
-// Vulkan compute entry point. Compiled to SPIR-V at build time, once per scratch mode
-// (-DCIP_SMODE=n); the host backend embeds the three modules.
+// Vulkan compute entry point. Compiled to SPIR-V at build time, once per variant of the
+// loop (-DCIP_SMODE=n); the host backend embeds the modules.
 
 #define CIP_TARGET_GLSL
 #include "defs.h"

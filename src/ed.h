@@ -1,4 +1,4 @@
-// Host-side Ed25519 helpers built on the kernel field arithmetic.
+// Host-side Ed25519 and Curve25519 helpers built on the kernel field arithmetic.
 //
 // Everything here handles public data only (points, table entries). Secret scalars are
 // only ever touched by libsodium; see keys.cpp.
@@ -31,8 +31,18 @@ void compress(uint8_t pk[32], const Affine &p);
 // k*B for a public multiplier k (via libsodium), in affine coordinates.
 Affine base_mult_u64(uint64_t k);
 
+// The same point on Curve25519 in Montgomery form, v^2 = u^3 + 486662 u^2 + u, where u is
+// its x25519 public key: u = (1 + y)/(1 - y), v = sqrt(-486664) u/x.
+struct Montgomery {
+    fe u, v;  // canonical
+};
+Montgomery to_montgomery(const Affine &p);
+
 // Kernel table for N pairs: kappa_i, (k_i, y_i, x_i) for Q_i = 8i*B, and the step point
 // 8(2N+1)*B. Layout documented in kernel/search.h.
 std::vector<uint32_t> build_table(uint32_t npairs);
+
+// The table of the x25519 search: (u_i, v_i) of the same points, the step's last.
+std::vector<uint32_t> build_table_x25519(uint32_t npairs);
 
 }  // namespace ed

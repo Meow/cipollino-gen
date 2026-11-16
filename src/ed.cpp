@@ -9,6 +9,7 @@ namespace ed {
 
 static fe g_d;       // -121665/121666
 static fe g_sqrtm1;  // sqrt(-1)
+static fe g_scale;   // sqrt(-486664), the factor between x and u/v
 
 static fe small(uint32_t v)
 {
@@ -85,6 +86,27 @@ void init()
     g_sqrtm1 = fe_mul(fe_sqn(t.z250, 3), small(8));
     fe m1 = neg(fe_one());
     if (!equal(fe_sq(g_sqrtm1), m1)) throw std::runtime_error("ed::init: sqrt(-1) self-check failed");
+
+    // sqrt(-486664): s^((p+3)/8) with (p+3)/8 = 2^252 - 2, times sqrt(-1) if that is a
+    // root of -s. The base point has to come out as u = 9 on the curve.
+    fe s = neg(small(486664));
+    t = fe_pow_2_250_1(s);
+    g_scale = fe_mul(fe_mul(fe_sqn(t.z250, 2), s), s);
+    if (!equal(fe_sq(g_scale), s)) g_scale = fe_mul(g_scale, g_sqrtm1);
+    Montgomery b = to_montgomery(base_mult_u64(1));
+    fe u2 = fe_sq(b.u);
+    fe rhs = fe_carry(fe_add(fe_add(fe_mul(u2, b.u), fe_mul(small(486662), u2)), b.u));
+    if (!equal(fe_sq(g_scale), s) || !equal(b.u, small(9)) || !equal(fe_sq(b.v), rhs))
+        throw std::runtime_error("ed::init: Montgomery form self-check failed");
+}
+
+Montgomery to_montgomery(const Affine &p)
+{
+    Montgomery m;
+    fe u = fe_mul(fe_one_plus(p.y), fe_invert(fe_carry(fe_one_minus(p.y))));
+    m.u = canonical(u);
+    m.v = canonical(fe_mul(fe_mul(g_scale, u), fe_invert(p.x)));
+    return m;
 }
 
 bool decompress(Affine &out, const uint8_t pk[32])
@@ -155,6 +177,18 @@ std::vector<uint32_t> build_table(uint32_t npairs)
         put(t, at + 10, q.y);
         put(t, at + 20, q.x);
         if (i < N) put(t, 10 * i, canonical(fe_sq(k)));
+    }
+    return t;
+}
+
+std::vector<uint32_t> build_table_x25519(uint32_t npairs)
+{
+    const size_t N = npairs;
+    std::vector<uint32_t> t(20 * N + 20);
+    for (size_t i = 0; i <= N; i++) {
+        Montgomery q = to_montgomery(base_mult_u64(i < N ? 8 * (uint64_t)(i + 1) : 8 * (2 * (uint64_t)N + 1)));
+        put(t, 20 * i, q.u);
+        put(t, 20 * i + 10, q.v);
     }
     return t;
 }

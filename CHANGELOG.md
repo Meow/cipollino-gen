@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org). Before 1.0, options and output
 may change between minor versions.
 
+## Unreleased
+
+- Client authorization keys: `--client` searches for x25519 key pairs with a prefix on
+  the public key, `--service` writes them ready for `ClientOnionAuthDir`.
+- Vulkan measures its thread count on discrete AMD GPUs: 5% on an RX 6700 XT.
+
 ## 0.2.0
 
 - Wildcards in prefixes: `?d` for a digit, `?l` for a letter, `?a` for either.

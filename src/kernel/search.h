@@ -202,6 +202,85 @@ CIP_FN void cip_pair(u32 i, fe t, fe inv, fe x1, fe y1, u32 q, u32 tid, u32 batc
     cip_check_product(fe_sub(A, B), fe_sub(inv, w), tid, batch, code + 1u, prm CIP_BUFS);
 }
 
+// ---- the x25519 search ---------------------------------------------------------------
+//
+// An x25519 public key (what Tor calls a client authorization key) is the u coordinate of
+// a point of the same curve in Montgomery form, v^2 = u^3 + A u^2 + u with A = 486662.
+// There the centre is C = (u1, v1), Q_i = (u_i, v_i), and the candidates of a pair
+//     u(C + Q_i) = ((v_i - v1) / (u_i - u1))^2 - A - u1 - u_i
+//     u(C - Q_i) = ((v_i + v1) / (u_i - u1))^2 - A - u1 - u_i
+// share the inverse of u_i - u1, a denominator that costs nothing to form. With
+// Montgomery's trick a pair takes 5 multiplications and 2 squarings: 3.5 a key.
+//
+// Buffers as above, except
+//   state   [T * 20]     per thread: u1, v1, tight
+//   table   [20*N + 20]  (u_i, v_i) for i=1..N, then (u, v) of the step (2N+1)*G8
+//   scratch              N slots per thread: the running product before each pair
+
+CIP_FN fe cip_zero()
+{
+    fe r = fe_one();
+    r.v[0] = 0u;
+    return r;
+}
+
+// Test the candidate u = lambda2 - u_i - (u1 + A), given m = -(u1 + A), tight.
+CIP_FN void cip_check_u(fe lambda2, fe ui, fe m, u32 tid, u32 batch, u32 code, cip_params prm CIP_BUFS_DECL)
+{
+    fe u = fe_carry(fe_add(fe_sub(lambda2, ui), m));
+    if (cip_prefilter(fe_low32(u), prm CIP_BUFS)) cip_check(u, tid, batch, code, prm CIP_BUFS);
+}
+
+CIP_FN void cip_search_x25519(u32 tid, cip_params prm CIP_BUFS_DECL)
+{
+    const u32 T = prm.nthreads;
+    const u32 N = prm.npairs;
+    const u32 tab_step = 20u * N;
+    fe a = cip_zero();
+    a.v[0] = 486662u;
+
+    fe u1 = cip_state_load(tid * CIP_STATE_WORDS CIP_BUFS);
+    fe v1 = cip_state_load(tid * CIP_STATE_WORDS + 10u CIP_BUFS);
+
+    for (u32 b = 0u; b < prm.nbatches; b++) {
+        cip_check(u1, tid, b, 0u, prm CIP_BUFS);
+        fe m = fe_carry(fe_sub(fe_sub(cip_zero(), u1), a));
+
+        // Forward pass: running product of the denominators, the step's first.
+        fe p = fe_carry(fe_sub(cip_table_load(tab_step CIP_BUFS), u1));
+        for (u32 i = 0u; i < N; i++) {
+            cip_scratch_store(i, tid, T, p CIP_BUFS);
+            p = fe_mul_tl(p, fe_sub(cip_table_load(20u * i CIP_BUFS), u1));
+        }
+
+        fe inv_all = fe_invert(p);
+
+        // Backward pass: peel one inverse per pair and finish both of its candidates.
+        CIP_AHEAD(ahead, N - 1u);
+        for (u32 i = N; i-- > 0u;) {
+            fe8 mine;
+            CIP_TAKE(mine, ahead, i, i > 0u ? i - 1u : 0u);
+            fe ui = cip_table_load(20u * i CIP_BUFS);
+            fe vi = cip_table_load(20u * i + 10u CIP_BUFS);
+            fe inv = fe_mul_t(inv_all, fe_unpack(mine));
+            inv_all = fe_mul_tl(inv_all, fe_sub(ui, u1));
+            u32 code = 2u * (i + 1u);
+            cip_check_u(fe_sq(fe_mul_tl(inv, fe_sub(vi, v1))), ui, m, tid, b, code, prm CIP_BUFS);
+            cip_check_u(fe_sq(fe_mul_tl(inv, fe_add(vi, v1))), ui, m, tid, b, code + 1u, prm CIP_BUFS);
+        }
+
+        // inv_all is now 1/(us - u1): move the centre by the step point.
+        fe us = cip_table_load(tab_step CIP_BUFS);
+        fe lambda = fe_mul_cold(inv_all, fe_sub(cip_table_load(tab_step + 10u CIP_BUFS), v1));
+        fe u3 = fe_carry(fe_add(fe_sub(fe_sq_cold(lambda), us), m));
+        v1 = fe_carry(fe_sub(fe_mul_cold(lambda, fe_sub(u1, u3)), v1));
+        u1 = u3;
+    }
+
+    cip_state_store(tid * CIP_STATE_WORDS, u1 CIP_BUFS);
+    cip_state_store(tid * CIP_STATE_WORDS + 10u, v1 CIP_BUFS);
+}
+
 // The work of thread `tid` for one launch. SMODE is one of CIP_SCRATCH_*: a template
 // argument on the C++ targets, a macro in GLSL.
 CIP_SMODE_TEMPLATE
@@ -211,6 +290,10 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
     const u32 T = prm.nthreads;
     const u32 N = prm.npairs;
     const u32 smode = CIP_U32(SMODE);
+    if (smode == CIP_SCRATCH_X25519) {
+        cip_search_x25519(tid, prm CIP_BUFS);
+        return;
+    }
     const u32 tab_pt = 10u * N;    // (k_i, y_i, x_i); kappa_i starts at 0
     const u32 tab_step = 40u * N;  // the step point
 

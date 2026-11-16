@@ -40,6 +40,28 @@ A pair costs 8 multiplications, one squaring and two probes in the `lean` scratc
 about 4.6 multiplications per key (on an M5 Pro a squaring costs 0.57 of a
 multiplication and a probe 0.35), plus 1 to 3% for the batch inversion.
 
+## The client key search
+
+A client authorization key is an x25519 public key: the `u` coordinate of a point of
+the same curve in Montgomery form, `v^2 = u^3 + A u^2 + u`. The walk is the same, over
+the same scalars, with centre `C = (u1, v1)` and table points `Q_i = (u_i, v_i)`:
+
+```
+u(C + Q_i) = ((v_i - v1) / (u_i - u1))^2 - A - u1 - u_i
+u(C - Q_i) = ((v_i + v1) / (u_i - u1))^2 - A - u1 - u_i
+```
+
+The two share the inverse of `u_i - u1`, a denominator that takes a subtraction to form
+where the address search multiplies. With Montgomery's trick a pair costs 5
+multiplications and 2 squarings, 3.5 multiplications a key, and stores one running
+product. The subtraction after the squaring rules out a probe: each candidate is carried
+in full and its low 32 bits are tested.
+
+It is a fourth variant of the kernel loop next to the three scratch modes, compiled on
+its own, so it changes nothing about the address search. Measured against that search
+it is 1.38 times as fast on an M5 Pro (Metal) and 1.35 to 1.37 times on a Radeon 610M
+(Vulkan, ROCm).
+
 ## Scratch modes
 
 The forward pass builds a running product of the denominators; the backward pass peels
@@ -80,6 +102,8 @@ two-instruction carry.
 |---|---|---|
 | Vulkan (Mesa 25.2 and 26.2) | 3.97 ns | 2.16 ns |
 | ROCm 6.4 | 1.67 ns | 2.61 ns, and miscompiled |
+
+An RX 6700 XT behind Mesa agrees: 2.00 G keys/s narrow, 1.24 G wide.
 
 Elsewhere narrow loses: an M5 Pro runs it at 0.42 of wide's speed, and on an RTX 4090 its
 400 multiplies should cost twice the energy of 100 wide ones (not measured). So the
@@ -170,7 +194,13 @@ wide one fewer.
 
 - Fastest at 1024 to 2048 threads, a third slower at 16384. Vulkan cannot ask a device
   how wide it is, so on integrated GPUs it measures the thread count at start-up.
+- Discrete cards have an optimum too, so Vulkan measures on them as well. A 40-unit RX
+  6700 XT is fastest at 65536 threads: 5% ahead of 131072, 15% ahead of 16384. There
+  `full` scratch beats `lean` by 8 to 10% at batches of 1024 pairs and more.
 - ROCm is 5% faster with batches of 512 pairs than of 1024.
+- The rate scales with the size of the GPU. The HIP runtime counts one multiprocessor
+  here and 36 in an RX 6800 XT, which does 3.82 G keys/s: 106 M on each, as here. An
+  RX 6700 XT, 20 of them, does 1.95 G keys/s with Vulkan: 98 M on each, against 90 M here.
 - A function call makes this GPU spill its registers. hipcc compiles the whole kernel as
   one function in seconds, so the ROCm build inlines everything: 2%.
 

@@ -5,6 +5,7 @@ GPU vanity address generator for Tor v3 onion services.
 - Built for GPUs: **CUDA** (NVIDIA), **ROCm** (AMD), **Metal** (Apple) and **Vulkan**
   (any vendor), on every GPU in the machine.
 - Searches for any number of prefixes at once, with wildcards.
+- Finds client authorization keys with a prefix too (`--client`).
 - Seeds come from the OS CSPRNG, the GPU never sees a secret, and every key is derived
   again and validated on the CPU with libsodium before it is written.
 
@@ -69,6 +70,8 @@ cipollino [options] PREFIX [PREFIX...]
   -n, --count N       stop after N keys (default 1; 0 = run until interrupted)
   -d, --dir DIR       where to create the <address>.onion directories (default .)
   -f, --file FILE     read more prefixes from FILE, one per line
+      --client        search for client authorization keys instead
+      --service ADDR  with --client: the onion address the keys are for
   -b, --backend NAME  auto (default), cuda, rocm, metal, vulkan or cpu
       --devices LIST  devices to use, numbered as the backend lists them, e.g. 0,2
       --threads T     kernel threads per device
@@ -105,6 +108,26 @@ an unclamped scalar are reported as notes. The exit status is 1 if a directory f
 Damage to the second half of the secret key (the nonce prefix) cannot be detected:
 nothing public depends on it.
 
+**Client keys.** `--client` searches for x25519 key pairs, which an onion service uses
+to [authorize clients](https://community.torproject.org/onion-services/advanced/client-auth/),
+with the prefix on the public key in base32:
+
+```
+$ cipollino --client onionz
+device 0: Metal: Apple M5 Pro | 65536 threads x 2049 keys/batch | 2048 MiB scratch (lean) | self-test ok
+ONIONZBYIMR7235AIJ337EFNVY4SG5EBDFIOTXHRWZRK5OBXJNGA
+2.28G keys tested in 985 ms (2.32G keys/s), 1 key found
+```
+
+| file | content | where it goes |
+|---|---|---|
+| `<KEY>.auth` | `descriptor:x25519:<public key>` | the service's `authorized_clients` directory |
+| `<KEY>.private` | the private key in base32 | what Tor Browser asks for |
+| `<KEY>.auth_private` | `<address>:descriptor:x25519:<private key>` | the client's `ClientOnionAuthDir`; written in place of `<KEY>.private` with `--service ADDRESS` |
+
+Files are named after the public key and created with mode 0600. `--verify` and
+`--scratch` do not apply.
+
 ## Performance
 
 <picture>
@@ -121,12 +144,23 @@ nothing public depends on it.
 | Apple M5 Pro, first 20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, heat-soaked | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU | 150 M |
+| AMD Radeon RX 6800 XT | ROCm 10.0 | 3.82 G |
+| AMD Radeon RX 6700 XT | Vulkan (Mesa) | 1.95 G |
 | AMD Radeon 610M (2 compute units) | ROCm 6.4 | 107 M |
 | AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M |
 
-Measured with `--bench`: the 4090 and the Radeon in the container images, the 2060
-SUPER and the 1650 SUPER with the Windows program. Not tested: discrete AMD GPUs, Intel
-GPUs, and AMD GPUs under Windows.
+Measured with `--bench`: the 4090 and the Radeon 610M in the container images, the 2060
+SUPER, the 1650 SUPER and the RX 6800 XT with the Windows programs, the RX 6700 XT under
+Linux. Not tested: Intel GPUs, and the Vulkan backend under Windows.
+
+The client key search needs fewer multiplications per key and runs about 1.35 times as
+fast:
+
+| device | backend | addresses | client keys |
+|---|---|---|---|
+| Apple M5 Pro, first seconds | Metal | 1.7 G | 2.4 G |
+| AMD Radeon 610M | ROCm 6.4 | 107 M | 147 M |
+| AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M | 122 M |
 
 Every extra character multiplies the work by 32:
 
@@ -170,7 +204,7 @@ measures at start-up. `--tune` measures more and prints the fastest setting as f
 | flag | what it trades |
 |---|---|
 | `--scratch` | Device memory traffic for arithmetic: `full` stores two field elements per key pair, `lean` one (one more squaring), `half` one per two pairs (half a multiplication more). Measured at start-up. |
-| `--threads` | More threads cost memory; too few leave the GPU idle. CUDA uses 2048 per multiprocessor, ROCm 1024 per compute unit, Metal 65536, Vulkan 131072 on discrete GPUs and what it measures (1024 to 16384) on integrated ones. |
+| `--threads` | More threads cost memory; too few leave the GPU idle. CUDA uses 2048 per multiprocessor, ROCm 1024 per multiprocessor (two compute units), Metal 65536. Vulkan measures: 1024 to 16384 on integrated GPUs, 16384 to 131072 on discrete AMD ones; other discrete GPUs get 131072. |
 | `--pairs` | Larger batches spread the one inversion per batch thinner (3% of the work at 512 pairs, 1.5% at 1024) and take `threads * pairs * 32` bytes in `lean` mode. |
 | `--arith` | The field multiplication: `wide` on 32x32 multiplies, `narrow` on 24-bit ones. Only Vulkan has both; it measures them on every GPU that is not NVIDIA's or Apple's, which get `wide`. |
 | `--filter` | `bitmap` sends a short prefix list through the bit tables that long lists use. For comparing the two with `--bench`. |
@@ -205,6 +239,10 @@ For each one the host, with libsodium alone:
 
 A hit that fails is discarded with a warning.
 
+A client key is the same scalar used as an x25519 private key, one per seed as well. The
+host computes its public key, checks it against the Montgomery form of the scalar's
+Ed25519 key, compares the prefix as text, and runs a key exchange with a throwaway pair.
+
 **The GPU is checked too**, so that it does not silently miss keys. At every start each
 device has to find a few dozen keys that the CPU derived from the device's own seeds.
 `--selftest` goes further: it enumerates every key of small configurations with
@@ -223,6 +261,10 @@ is computed. Each GPU thread owns a public point `C` and tests `C ± i·8B` for 
 the batch size, two keys per shared inversion, with one real field inversion per batch.
 The last multiplication of each key is replaced by a 32-bit probe that almost always
 suffices to reject it. That comes to about 4.6 field multiplications per key.
+
+A client key is the `u` coordinate of the same point on the curve's Montgomery form,
+where the two keys of a pair share a denominator that costs nothing to form: 3.5
+multiplications per key.
 
 The kernel is one source in the common subset of CUDA/HIP C++, the Metal Shading
 Language, GLSL and plain C++, so every backend and the CPU tests run the same arithmetic.
@@ -322,8 +364,9 @@ make docker-rocm-test   # ROCm and Vulkan
   the worst-case limb values of every operand class.
 - `--selftest` on every backend in the build, on the CUDA backend against a simulated
   runtime (`tests/cuda_sim.h`), and on a CPU build of each multiplication.
-- `tests/test_cli.py`: end-to-end runs whose keys an independent pure-Python Ed25519
-  verifies, and `--verify` against intact and damaged key directories.
+- `tests/test_cli.py`: end-to-end runs whose keys, addresses and client keys alike, an
+  independent pure-Python Ed25519 verifies, and `--verify` against intact and damaged key
+  directories.
 
 ## Versions
 

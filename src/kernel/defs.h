@@ -140,6 +140,9 @@ typedef uint64_t u64;
 #define CIP_SCRATCH_HALF 0u
 #define CIP_SCRATCH_LEAN 1u
 #define CIP_SCRATCH_FULL 2u
+// A fourth variant of the loop is another search: x25519 public keys (search.h). It has
+// one scratch layout, LEAN's, and is chosen the way a scratch mode is.
+#define CIP_SCRATCH_X25519 3u
 
 // Scratch layout, chosen by the including backend (see search.h).
 #ifndef CIP_SCRATCH_AOS
@@ -165,7 +168,7 @@ typedef uint64_t u64;
 #define CIP_ARITH CIP_ARITH_WIDE
 #endif
 
-#define CIP_STATE_WORDS 20u  // per thread: x and y of its centre, 10 limbs each
+#define CIP_STATE_WORDS 20u  // per thread: both coordinates of its centre, 10 limbs each
 #define CIP_HIT_WORDS 3u
 
 // The pre-filter on the first 32 bits of a key, by number of prefixes:

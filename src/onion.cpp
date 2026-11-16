@@ -80,14 +80,39 @@ std::string address(const uint8_t pk[32])
     raw[33] = digest[1];
     raw[34] = 0x03;
 
+    return base32(raw, sizeof raw);  // 35 bytes = 280 bits = exactly 56 characters
+}
+
+std::string base32(const uint8_t *data, size_t len)
+{
     static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz234567";
-    std::string out(56, '?');
-    for (int i = 0; i < 56; i++) {
-        int bit = 5 * i;  // 35 bytes = 280 bits = exactly 56 characters
-        uint32_t w = ((uint32_t)raw[bit / 8] << 8) | (bit / 8 + 1 < 35 ? raw[bit / 8 + 1] : 0);
+    std::string out((len * 8 + 4) / 5, '?');
+    for (size_t i = 0; i < out.size(); i++) {
+        size_t bit = 5 * i;
+        uint32_t w = ((uint32_t)data[bit / 8] << 8) | (bit / 8 + 1 < len ? data[bit / 8 + 1] : 0);
         out[i] = alphabet[(w >> (11 - bit % 8)) & 31];
     }
     return out;
+}
+
+bool normalize_address(std::string &address)
+{
+    const std::string suffix = ".onion";
+    if (address.size() >= suffix.size() && address.compare(address.size() - suffix.size(), suffix.size(), suffix) == 0)
+        address.resize(address.size() - suffix.size());
+    if (address.size() != 56) return false;
+    uint8_t pk[32] = {0};
+    for (size_t i = 0; i < 56; i++) {
+        char &c = address[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        int v = base32_value(c);
+        if (v < 0) return false;
+        for (int b = 0; b < 5; b++) {
+            size_t bit = 5 * i + b;
+            if (bit < 256 && ((v >> (4 - b)) & 1)) pk[bit / 8] |= (uint8_t)(0x80 >> (bit % 8));
+        }
+    }
+    return onion::address(pk) == address;
 }
 
 int base32_value(char c)
@@ -109,10 +134,10 @@ static uint32_t wildcard_set(char c)
     return 0;
 }
 
-bool normalize_prefix(std::string &prefix, std::string &err)
+bool normalize_prefix(std::string &prefix, std::string &err, bool client)
 {
     const std::string suffix = ".onion", given = prefix;
-    if (prefix.size() >= suffix.size() && prefix.compare(prefix.size() - suffix.size(), suffix.size(), suffix) == 0)
+    if (!client && prefix.size() >= suffix.size() && prefix.compare(prefix.size() - suffix.size(), suffix.size(), suffix) == 0)
         prefix.resize(prefix.size() - suffix.size());
     if (prefix.empty()) {
         err = "empty prefix";
@@ -130,12 +155,13 @@ bool normalize_prefix(std::string &prefix, std::string &err)
                 return false;
             }
         } else if (base32_value(c) < 0) {
-            err = "prefix '" + given + "' contains '" + std::string(1, c) + "': onion addresses only use a-z and 2-7";
+            err = "prefix '" + given + "' contains '" + std::string(1, c) + "': " +
+                  (client ? "keys in base32" : "onion addresses") + " only use a-z and 2-7";
             return false;
         }
     }
-    if (length > 56) {
-        err = "prefix '" + given + "' is longer than an onion address (56 characters)";
+    if (length > (client ? 52u : 56u)) {
+        err = "prefix '" + given + "' is longer than " + (client ? "a key (52 characters)" : "an onion address (56 characters)");
         return false;
     }
     return true;

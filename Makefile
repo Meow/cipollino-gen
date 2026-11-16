@@ -120,7 +120,7 @@ $(BUILD)/backend_metal.o: src/backend_metal.mm $(HDRS) $(BUILD)/kernel_metal.inc
 # The Vulkan kernel is compiled to SPIR-V here and embedded: one module per scratch mode
 # for each field arithmetic (w: wide, n: narrow).
 GLSLFLAGS = -V --target-env vulkan1.1 -DCIP_SCRATCH_AOS=$(VULKAN_AOS) -Isrc/kernel
-VK_MODULES := w0 w1 w2 n0 n1 n2
+VK_MODULES := w0 w1 w2 w3 n0 n1 n2 n3
 
 $(BUILD)/kernel_vk_w%.spv: src/kernel/entry_vulkan.comp $(KERNEL) $(BUILD)/config | $(BUILD)
 	$(GLSLANG) $(GLSLFLAGS) -DCIP_ARITH=0 -DCIP_SMODE=$* -o $@ $<

@@ -122,12 +122,14 @@ struct fe_probe {
 // 64-bit columns from 32x32 products; field13.h gets by on 24-bit multipliers, for GPUs
 // where the wide ones are slow. fe_mul_t is fe_mul for the operands of the search loop's
 // own products, which field13.h can take as they are: f tight, and g tight or one of
-// fe_one_minus, fe_one_plus of a tight value.
+// fe_one_minus, fe_one_plus of a tight value. fe_mul_tl is that with any loose g.
 #if CIP_ARITH == CIP_ARITH_NARROW
 #include "field13.h"
+#define fe_mul_tl(f, g) fe_mul_t((f), fe_weak(g))
 #else
 
 #define fe_mul_t(f, g) fe_mul((f), (g))
+#define fe_mul_tl(f, g) fe_mul((f), (g))
 
 // h = f * g. Term f_i*g_j lands in column (i+j) mod 10, times 19 if it wrapped, times 2
 // if i and j are both odd (two 25-bit limbs overshoot the column offset by one bit).

@@ -17,6 +17,14 @@ Key::Key()
 
 Key::~Key() { sodium_memzero(sk, sizeof sk); }
 
+ClientKey::ClientKey()
+{
+    memset(sk, 0, sizeof sk);
+    memset(pk, 0, sizeof pk);
+}
+
+ClientKey::~ClientKey() { sodium_memzero(sk, sizeof sk); }
+
 void random_seed(uint8_t seed[32]) { randombytes_buf(seed, 32); }
 
 // Standard Ed25519 key expansion (RFC 8032 5.1.5).
@@ -132,6 +140,78 @@ bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std:
         return false;
     }
     return true;
+}
+
+bool client_public_key(uint8_t pk[32], const uint8_t seed[32], Offset m)
+{
+    uint8_t sk[64];
+    expand(sk, seed);
+    bool ok = shift_scalar(sk, m) && crypto_scalarmult_base(pk, sk) == 0;
+    sodium_memzero(sk, sizeof sk);
+    return ok;
+}
+
+bool finalize_client(ClientKey &out, const uint8_t seed[32], Offset m, const std::vector<std::string> &prefixes,
+                     std::string &why)
+{
+    uint8_t sk[64], ed_pk[32], converted[32], other_sk[32], other_pk[32], mine[32], theirs[32];
+    expand(sk, seed);
+    bool clamped = shift_scalar(sk, m);
+    memcpy(out.sk, sk, 32);
+    bool derived = crypto_scalarmult_base(out.pk, out.sk) == 0 && crypto_scalarmult_ed25519_base_noclamp(ed_pk, sk) == 0;
+    sodium_memzero(sk, sizeof sk);
+    if (!clamped) {
+        why = "scalar left the clamped range";
+        return false;
+    }
+    if (!derived) {
+        why = "scalar multiplication failed";
+        return false;
+    }
+    out.text = onion::base32(out.pk, 32);
+    if (crypto_sign_ed25519_pk_to_curve25519(converted, ed_pk) != 0 || sodium_memcmp(converted, out.pk, 32) != 0) {
+        why = "public key is not the Montgomery form of the scalar's Ed25519 key";
+        return false;
+    }
+    bool match = false;
+    for (const std::string &p : prefixes)
+        if (onion::prefix_matches(p, out.text)) match = true;
+    if (!match) {
+        why = "key " + out.text + " does not match any prefix";
+        return false;
+    }
+    randombytes_buf(other_sk, sizeof other_sk);
+    bool agree = crypto_scalarmult_base(other_pk, other_sk) == 0 && crypto_scalarmult(mine, out.sk, other_pk) == 0 &&
+                 crypto_scalarmult(theirs, other_sk, out.pk) == 0 && sodium_memcmp(mine, theirs, 32) == 0;
+    sodium_memzero(other_sk, sizeof other_sk);
+    sodium_memzero(mine, sizeof mine);
+    sodium_memzero(theirs, sizeof theirs);
+    if (!agree) {
+        why = "key exchange with the derived key does not agree";
+        return false;
+    }
+    return true;
+}
+
+static std::string upper(std::string s)
+{
+    for (char &c : s)
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    return s;
+}
+
+bool write_client_key(const std::string &dir, const ClientKey &key, const std::string &service, std::string &name,
+                      std::string &err)
+{
+    name = upper(key.text);
+    if (!plat::make_private_dir(dir, true, err)) return false;
+    std::string pub = "descriptor:x25519:" + name + "\n";
+    std::string sec = upper(onion::base32(key.sk, 32)) + "\n";
+    if (!service.empty()) sec = service + ":descriptor:x25519:" + sec;
+    bool ok = plat::write_new_file(dir + "/" + name + ".auth", pub.data(), pub.size(), err) &&
+              plat::write_new_file(dir + "/" + name + (service.empty() ? ".private" : ".auth_private"), sec.data(), sec.size(), err);
+    sodium_memzero(&sec[0], sec.size());
+    return ok;
 }
 
 bool write_tor_dir(const std::string &dir, const Key &key, std::string &err)

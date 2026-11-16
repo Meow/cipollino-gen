@@ -125,6 +125,32 @@ def check_key_dir(path, prefixes):
     return addr, sk
 
 
+def b32decode(text):
+    return base64.b32decode(text + "=" * (-len(text) % 8))
+
+
+def check_client_key(out, name, prefixes, service=None):
+    """A client authorization key pair as Tor takes it: the x25519 public key of the private one."""
+    assert name == name.upper() and len(name) == 52, name
+    assert open(os.path.join(out, name + ".auth")).read() == f"descriptor:x25519:{name}\n"
+    private = open(os.path.join(out, name + (".auth_private" if service else ".private"))).read()
+    assert private.endswith("\n")
+    if service:
+        address, kind, curve, private = private.split(":")
+        assert (address, kind, curve) == (service, "descriptor", "x25519"), private
+    assert os.name != "posix" or all(stat.S_IMODE(os.stat(os.path.join(out, f)).st_mode) == 0o600 for f in os.listdir(out))
+    pk, sk = b32decode(name), b32decode(private.strip())
+    assert len(pk) == 32 and len(sk) == 32
+    assert any(matches(name.lower(), p) for p in prefixes), f"{name} matches none of {prefixes}"
+    a = int.from_bytes(sk, "little")
+    assert a % 8 == 0 and 2**254 <= a < 2**255, "private key is not a clamped scalar"
+    x, y, z, _ = mul(a, G)
+    y = y * pow(z, P - 2, P) % P
+    u = (1 + y) * pow(1 - y, P - 2, P) % P
+    assert u.to_bytes(32, "little") == pk, "public key does not belong to the private key"
+    return sk
+
+
 def run(binary, backend, args, expect=0):
     cmd = [binary, "--backend", backend, "-q"] + args
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -244,6 +270,22 @@ def main():
         shutil.copytree(good, intact)
         flip("hs_ed25519_secret_key", 80)(intact)
         run(binary, backend, ["--verify", intact])
+
+        # client authorization keys: x25519 pairs with a prefix on the public key in base32
+        out = os.path.join(tmp, "client")
+        wanted = ["ab", "Q?d", "zz?l"]
+        r = run(binary, backend, ["--client", "-n", "6", "-d", out] + wanted)
+        names = sorted(r.stdout.split())
+        assert len(names) == 6 and sorted(os.listdir(out)) == sorted(n + e for n in names for e in (".auth", ".private"))
+        assert len({check_client_key(out, n, [w.lower() for w in wanted]) for n in names}) == 6
+        out = os.path.join(tmp, "client-service")
+        service = onion_address(bytes(range(32)))
+        r = run(binary, backend, ["--client", "--service", service.upper() + ".onion", "-d", out, "c"])
+        (name,) = r.stdout.split()
+        check_client_key(out, name, ["c"], service)
+        for bad in (["--client", "abc1"], ["--client", "a" * 53], ["--client", "--service", service[:-1] + "e", "ab"],
+                    ["--service", service, "ab"], ["--client", "--scratch", "lean", "ab"], ["--client", "--verify"]):
+            run(binary, backend, ["-d", os.path.join(tmp, "bad")] + bad, expect=2)
 
         # bad input is rejected before any work happens
         for bad in (["abc1"], ["has space"], ["a" * 57], ["ab?"], ["a?x"], ["?d" * 57], []):

@@ -130,7 +130,7 @@ private:
     // The compiled kernel specialised for a scratch mode (compiled on first use).
     id<MTLComputePipelineState> pipeline(uint32_t smode)
     {
-        if (smode > 2) throw std::runtime_error("bad scratch mode");
+        if (smode > CIP_SCRATCH_X25519) throw std::runtime_error("bad scratch mode");
         if (pipelines_[smode]) return pipelines_[smode];
         NSString *src = [[NSString alloc] initWithBytes:kernel_metal_metal
                                                  length:kernel_metal_metal_len
@@ -162,7 +162,7 @@ private:
     id<MTLDevice> dev_;
     id<MTLCommandQueue> queue_;
     id<MTLComputePipelineState> pso_;
-    id<MTLComputePipelineState> pipelines_[3];
+    id<MTLComputePipelineState> pipelines_[4];
     id<MTLBuffer> state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_;
     cip_params prm_ = cip_params();
 };

@@ -35,6 +35,12 @@ static void usage(FILE *out)
         "  -n, --count N       stop after N keys (default 1; 0 = run until interrupted)\n"
         "  -d, --dir DIR       where to create the <address>.onion directories (default .)\n"
         "  -f, --file FILE     read more prefixes from FILE, one per line\n"
+        "      --client        search for client authorization keys instead: x25519 key pairs\n"
+        "                      whose public key in base32 starts with a prefix. Writes\n"
+        "                      <dir>/<KEY>.auth for the service and <dir>/<KEY>.private\n"
+        "      --service ADDR  with --client: the onion address the keys are for. Writes\n"
+        "                      <dir>/<KEY>.auth_private, ready for ClientOnionAuthDir, in\n"
+        "                      place of <KEY>.private\n"
         "  -b, --backend NAME  auto (default), cuda, rocm, metal, vulkan or cpu\n"
         "      --devices LIST  devices to use, numbered as the backend lists them, e.g. 0,2\n"
         "                      (default: all GPUs)\n"
@@ -164,6 +170,14 @@ int main(int argc, char **argv)
             value(opt.want);
         } else if (a == "-d" || a == "--dir") {
             opt.outdir = text();
+        } else if (a == "--client") {
+            opt.client = true;
+        } else if (a == "--service") {
+            opt.service = text();
+            if (!onion::normalize_address(opt.service)) {
+                fprintf(stderr, "error: --service needs a v3 onion address (56 characters)\n");
+                return 2;
+            }
         } else if (a == "-f" || a == "--file") {
             std::string path = text();
             std::ifstream in(path);
@@ -243,6 +257,15 @@ int main(int argc, char **argv)
         }
     }
 
+    if (opt.client && (verify || opt.scratch >= 0)) {
+        fprintf(stderr, "error: --client does not go with %s\n", verify ? "--verify" : "--scratch");
+        return 2;
+    }
+    if (!opt.client && !opt.service.empty()) {
+        fprintf(stderr, "error: --service needs --client\n");
+        return 2;
+    }
+
     if (verify) {
         if (sodium_init() < 0 || !known_answers()) {
             fprintf(stderr, "error: libsodium or the address encoding failed its start-up check\n");
@@ -253,7 +276,7 @@ int main(int argc, char **argv)
 
     for (std::string &p : raw) {
         std::string err;
-        if (!onion::normalize_prefix(p, err)) {
+        if (!onion::normalize_prefix(p, err, opt.client)) {
             fprintf(stderr, "error: %s\n", err.c_str());
             return 2;
         }

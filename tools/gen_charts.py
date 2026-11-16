@@ -65,7 +65,8 @@ def speed(t):
                     ("RTX 2060 SUPER, CUDA", 2.83e9, None, "2.83 G"), ("GTX 1650 SUPER, CUDA", 1.66e9, None, "1.66 G")]),
         ("Apple M5 Pro", [("Metal, first 20 s", 1.7e9, None, "1.7 G"), ("Metal, heat-soaked", 1.0e9, 1.5e9, "1.0 to 1.5 G"),
                           ("CPU, 18 cores", 150e6, None, "150 M")]),
-        ("AMD Radeon 610M", [("ROCm", 107e6, None, "107 M"), ("Vulkan", 90e6, None, "90 M")]),
+        ("AMD", [("RX 6800 XT, ROCm", 3.82e9, None, "3.82 G"), ("RX 6700 XT, Vulkan", 1.95e9, None, "1.95 G"),
+                 ("Radeon 610M, ROCm", 107e6, None, "107 M"), ("Radeon 610M, Vulkan", 90e6, None, "90 M")]),
     ]
     left, right, lo, hi = 190, 610, 7.5, 10.5
     rows = sum(len(items) for _, items in groups)

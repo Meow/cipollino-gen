@@ -43,7 +43,7 @@
 #define CIP_TARGET_CPU
 #include "kernel/defs.h"
 
-#include "kernel_vk.inc"  // kernel_vk_{w,n}{0,1,2}_spv[] and their _len: arithmetic, CIP_SCRATCH_*
+#include "kernel_vk.inc"  // kernel_vk_{w,n}{0,1,2,3}_spv[] and their _len: arithmetic, CIP_SCRATCH_*
 
 namespace {
 
@@ -181,10 +181,14 @@ public:
     // Integrated GPUs come two compute units wide and sixteen, and the small ones lose a
     // third of their speed when given the threads (and with them the scratch memory) of
     // the large ones: measured on a 2-unit Radeon 610M, which is fastest at 1024 to 2048.
+    // Discrete AMD GPUs vary as much: a 40-unit RX 6700 XT is fastest at 65536, 5% ahead
+    // of 131072 and 15% ahead of 16384.
     std::vector<uint32_t> thread_candidates() const override
     {
-        if (props_.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU || apple()) return {suggested_threads()};
-        return {1024, 2048, 4096, 8192, 16384};
+        if (apple()) return {suggested_threads()};
+        if (props_.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) return {1024, 2048, 4096, 8192, 16384};
+        if (props_.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && amd()) return {16384, 32768, 65536, 131072};
+        return {suggested_threads()};
     }
 
     uint32_t suggested_pairs() const override
@@ -242,7 +246,7 @@ public:
 
     void configure(uint32_t nthreads, uint32_t npairs, uint32_t smode, const std::vector<uint32_t> &table) override
     {
-        if (smode > CIP_SCRATCH_FULL) throw std::runtime_error("bad scratch mode");
+        if (smode > CIP_SCRATCH_X25519) throw std::runtime_error("bad scratch mode");
         uint64_t scratch = scratch_bytes(nthreads, npairs, smode);
         if (scratch > max_buffer_bytes())
             throw std::runtime_error("scratch buffer exceeds what this Vulkan device allows in one buffer; lower --threads or --pairs");
@@ -433,12 +437,12 @@ private:
     // the driver) on first use.
     VkPipeline pipeline(uint32_t arith, uint32_t smode)
     {
-        const uint32_t at = 3 * arith + smode;
+        const uint32_t at = 4 * arith + smode;
         if (pipelines_[at]) return pipelines_[at];
-        static const unsigned char *const code[kModules] = {kernel_vk_w0_spv, kernel_vk_w1_spv, kernel_vk_w2_spv,
-                                                            kernel_vk_n0_spv, kernel_vk_n1_spv, kernel_vk_n2_spv};
-        const unsigned len[kModules] = {kernel_vk_w0_spv_len, kernel_vk_w1_spv_len, kernel_vk_w2_spv_len,
-                                        kernel_vk_n0_spv_len, kernel_vk_n1_spv_len, kernel_vk_n2_spv_len};
+        static const unsigned char *const code[kModules] = {kernel_vk_w0_spv, kernel_vk_w1_spv, kernel_vk_w2_spv, kernel_vk_w3_spv,
+                                                            kernel_vk_n0_spv, kernel_vk_n1_spv, kernel_vk_n2_spv, kernel_vk_n3_spv};
+        const unsigned len[kModules] = {kernel_vk_w0_spv_len, kernel_vk_w1_spv_len, kernel_vk_w2_spv_len, kernel_vk_w3_spv_len,
+                                        kernel_vk_n0_spv_len, kernel_vk_n1_spv_len, kernel_vk_n2_spv_len, kernel_vk_n3_spv_len};
         std::vector<uint32_t> words(len[at] / 4);  // SPIR-V must be handed over 4-byte aligned
         memcpy(words.data(), code[at], words.size() * 4);
 
@@ -599,7 +603,7 @@ private:
     }
 
     static constexpr uint32_t kBindings = 7;  // state, table, scratch, hitctr, hits, filt, bitmap
-    static constexpr uint32_t kModules = 6;   // field arithmetics times scratch modes
+    static constexpr uint32_t kModules = 8;   // field arithmetics times loop variants
 
     std::shared_ptr<Instance> instance_;  // must outlive the device
     VkPhysicalDevice phys_;

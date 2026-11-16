@@ -112,33 +112,63 @@ private:
     uint8_t *p_;
 };
 
+// The search is for onion addresses or, with `client`, for x25519 keys. The two differ in
+// the form of the curve the kernel walks and in the key a candidate scalar stands for.
+
+std::vector<uint32_t> kernel_table(uint32_t npairs, bool client)
+{
+    return client ? ed::build_table_x25519(npairs) : ed::build_table(npairs);
+}
+
+// A thread's centre as the kernel takes it, from the Ed25519 public key of its scalar.
+bool centre_words(uint32_t *words, const uint8_t pk[32], bool client)
+{
+    ed::Affine p;
+    if (!ed::decompress(p, pk)) return false;
+    fe a = p.x, b = p.y;
+    if (client) {
+        ed::Montgomery m = ed::to_montgomery(p);
+        a = m.u;
+        b = m.v;
+    }
+    for (int k = 0; k < 10; k++) {
+        words[k] = a.v[k];
+        words[10 + k] = b.v[k];
+    }
+    return true;
+}
+
+// The key of seed + offset, as the 32 bytes the filter looks at.
+bool candidate_key(uint8_t key[32], const uint8_t seed[32], keys::Offset m, bool client)
+{
+    return client ? keys::client_public_key(key, seed, m) : keys::public_key(key, seed, m);
+}
+
+// What prefixes are matched against.
+std::string key_text(const uint8_t key[32], bool client)
+{
+    return client ? onion::base32(key, 32) : onion::address(key);
+}
+
 // Seed `count` threads starting at `first`: fresh CSPRNG seed, start point by libsodium,
 // affine coordinates for the kernel.
-std::vector<uint32_t> make_seeds(SeedStore &seeds, uint32_t first, uint32_t count)
+std::vector<uint32_t> make_seeds(SeedStore &seeds, uint32_t first, uint32_t count, bool client)
 {
     std::vector<uint32_t> words((size_t)count * CIP_STATE_WORDS);
     std::atomic<bool> failed(false);
     parallel_for(count, [&](uint32_t i) {
         uint8_t pk[32];
-        ed::Affine p;
         keys::random_seed(seeds[first + i]);
         keys::start_point(pk, seeds[first + i]);
-        if (!ed::decompress(p, pk)) {
-            failed = true;
-            return;
-        }
-        for (int k = 0; k < 10; k++) {
-            words[(size_t)i * CIP_STATE_WORDS + k] = p.x.v[k];
-            words[(size_t)i * CIP_STATE_WORDS + 10 + k] = p.y.v[k];
-        }
+        if (!centre_words(&words[(size_t)i * CIP_STATE_WORDS], pk, client)) failed = true;
     });
     if (failed) throw std::runtime_error("failed to decode a start point (this should be impossible)");
     return words;
 }
 
-void seed_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count)
+void seed_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count, bool client)
 {
-    std::vector<uint32_t> words = make_seeds(seeds, first, count);
+    std::vector<uint32_t> words = make_seeds(seeds, first, count, client);
     be.write_state(first, count, words.data());
 }
 
@@ -146,22 +176,15 @@ void seed_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count)
 // `batches_of(thread)` batches from their seeds: the centres are derived again from the
 // secret scalars, as the reference keys of the self-tests are.
 template <class F>
-void restore_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count, uint32_t npairs, F batches_of)
+void restore_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count, uint32_t npairs, bool client, F batches_of)
 {
     std::vector<uint32_t> words((size_t)count * CIP_STATE_WORDS);
     std::atomic<bool> failed(false);
     parallel_for(count, [&](uint32_t i) {
         uint8_t pk[32];
-        ed::Affine p;
         if (!keys::public_key(pk, seeds[first + i], hit_offset(Hit{first + i, 0, 0}, batches_of(first + i), npairs)) ||
-            !ed::decompress(p, pk)) {
+            !centre_words(&words[(size_t)i * CIP_STATE_WORDS], pk, client))
             failed = true;
-            return;
-        }
-        for (int k = 0; k < 10; k++) {
-            words[(size_t)i * CIP_STATE_WORDS + k] = p.x.v[k];
-            words[(size_t)i * CIP_STATE_WORDS + 10 + k] = p.y.v[k];
-        }
     });
     if (failed) throw std::runtime_error("failed to derive a thread's position again (this should be impossible)");
     be.write_state(first, count, words.data());
@@ -207,7 +230,7 @@ struct Lossless {
 
 const char *scratch_name(uint32_t smode)
 {
-    return smode == CIP_SCRATCH_FULL ? "full" : smode == CIP_SCRATCH_LEAN ? "lean" : "half";
+    return smode == CIP_SCRATCH_FULL ? "full" : smode == CIP_SCRATCH_HALF ? "half" : "lean";
 }
 
 const char *arith_name(uint32_t arith) { return arith == CIP_ARITH_NARROW ? "narrow" : "wide"; }
@@ -240,7 +263,7 @@ double measure(Backend &be, uint32_t nthreads, uint32_t npairs, uint32_t smode, 
                const std::vector<uint32_t> &start, double seconds)
 {
     std::vector<Hit> hits;
-    be.configure(nthreads, npairs, smode, ed::build_table(npairs));
+    be.configure(nthreads, npairs, smode, kernel_table(npairs, smode == CIP_SCRATCH_X25519));
     be.set_filter(filter);
     be.write_state(0, nthreads, start.data());
     be.launch(1, hits);  // first launch pays for page faults and lazy device set-up
@@ -292,11 +315,12 @@ public:
         const Options &opt = sh_.opt;
         std::vector<uint32_t> counts = opt.threads ? std::vector<uint32_t>{opt.threads} : be_.thread_candidates();
         std::vector<uint32_t> modes = opt.scratch >= 0 ? std::vector<uint32_t>{(uint32_t)opt.scratch} : be_.scratch_candidates();
+        if (opt.client) modes = {CIP_SCRATCH_X25519};
         std::vector<uint32_t> ariths = opt.arith >= 0 ? std::vector<uint32_t>{(uint32_t)opt.arith} : be_.arith_candidates();
         const uint32_t most = *std::max_element(counts.begin(), counts.end());
         if (*std::min_element(counts.begin(), counts.end()) == 0) throw std::runtime_error("threads must be positive");
         seeds_.reset(new SeedStore(most));
-        const std::vector<uint32_t> start = make_seeds(*seeds_, 0, most);
+        const std::vector<uint32_t> start = make_seeds(*seeds_, 0, most, opt.client);
 
         // What the backend cannot know about its device is measured: thread count, field
         // arithmetic, scratch mode, in that order. A kernel is only as good as the driver's
@@ -314,7 +338,7 @@ public:
 
                 base_.assign(T_, 0);
                 batches_ = 0;
-                be_.configure(T_, N_, smode_, ed::build_table(N_));
+                be_.configure(T_, N_, smode_, kernel_table(N_, opt.client));
                 be_.write_state(0, T_, start.data());
                 // Planted needles: derive a handful of this device's candidate keys on the
                 // CPU, search for exactly those, and require the GPU to report exactly them.
@@ -472,11 +496,11 @@ private:
         std::vector<std::string> needles;
         for (const Hit &h : want) {
             uint8_t pk[32];
-            if (!keys::public_key(pk, (*seeds_)[h.tid], hit_offset(h, batches_ - base_[h.tid], N_))) {
+            if (!candidate_key(pk, (*seeds_)[h.tid], hit_offset(h, batches_ - base_[h.tid], N_), sh_.opt.client)) {
                 why = "could not derive a needle key";
                 return false;
             }
-            needles.push_back(onion::address(pk).substr(0, 12));
+            needles.push_back(key_text(pk, sh_.opt.client).substr(0, 12));
         }
         be_.set_filter(build_filter(needles));
         std::vector<Hit> got;
@@ -507,7 +531,7 @@ private:
         const double nb_limit = window < T_ ? 1.0 : std::min(16384.0, std::max(1.0, budget / std::max(per_batch_hits, 1e-300)));
 
         Lossless lossless{be_, [this](uint32_t first, uint32_t count, uint32_t batch) {
-                              restore_threads(be_, *seeds_, first, count, N_,
+                              restore_threads(be_, *seeds_, first, count, N_, sh_.opt.client,
                                               [&](uint32_t t) { return batches_ - base_[t] + batch; });
                           }};
         uint32_t nb = 1;
@@ -536,25 +560,32 @@ private:
                     }
                     if (burned[h.tid]) continue;  // one key per seed, ever
                     keys::Key key;
+                    keys::ClientKey pair;
                     std::string why;
-                    if (!keys::finalize(key, (*seeds_)[h.tid], hit_offset(h, batches_ - base_[h.tid], N_), opt.prefixes, why)) {
+                    const keys::Offset m = hit_offset(h, batches_ - base_[h.tid], N_);
+                    if (!(opt.client ? keys::finalize_client(pair, (*seeds_)[h.tid], m, opt.prefixes, why)
+                                     : keys::finalize(key, (*seeds_)[h.tid], m, opt.prefixes, why))) {
                         // A prefix longer than the 64 bits the GPU compares can pass the GPU
                         // filter and still fail here; anything else means the device computed
                         // something the CPU cannot reproduce.
-                        if (key.address.empty() || !sh_.filter.matches(key.pk)) report_mismatch(h, why);
+                        const bool derived = opt.client ? !pair.text.empty() : !key.address.empty();
+                        if (!derived || !sh_.filter.matches(opt.client ? pair.pk : key.pk)) report_mismatch(h, why);
                         continue;
                     }
                     burned[h.tid] = 1;
                     burned_list.push_back(h.tid);
                     if (opt.bench_seconds > 0) continue;
-                    deliver(key);
+                    if (opt.client)
+                        deliver(pair);
+                    else
+                        deliver(key);
                 }
                 sh_.tested += (uint64_t)count * per_thread * nb;
 
                 // Retire every seed that produced a key and start those threads afresh:
                 // they run next in the following round.
                 for (uint32_t tid : burned_list) {
-                    seed_threads(be_, *seeds_, tid, 1);
+                    seed_threads(be_, *seeds_, tid, 1, opt.client);
                     base_[tid] = batches_ + nb;
                     burned[tid] = 0;
                 }
@@ -587,6 +618,25 @@ private:
         }
         if (sh_.tty) fprintf(stderr, "\r\033[K");
         printf("%s.onion\n", key.address.c_str());
+        fflush(stdout);
+        if (++sh_.found == opt.want) sh_.stop = true;
+    }
+
+    void deliver(const keys::ClientKey &key)
+    {
+        std::lock_guard<std::mutex> lock(sh_.out_mu);
+        const Options &opt = sh_.opt;
+        if (opt.want && sh_.found >= opt.want) return;
+        std::string name, err;
+        if (!keys::write_client_key(opt.outdir, key, opt.service, name, err)) {
+            if (sh_.tty) fprintf(stderr, "\r\033[K");
+            fprintf(stderr, "error: could not save %s: %s\n", name.c_str(), err.c_str());
+            sh_.failed = true;
+            sh_.stop = true;
+            return;
+        }
+        if (sh_.tty) fprintf(stderr, "\r\033[K");
+        printf("%s\n", name.c_str());
         fflush(stdout);
         if (++sh_.found == opt.want) sh_.stop = true;
     }
@@ -720,16 +770,18 @@ int run_tune(std::vector<std::unique_ptr<Backend>> &backends, const Options &opt
         if (!opt.threads && be.thread_candidates().size() > 1) counts = be.thread_candidates();
         std::sort(counts.begin(), counts.end());
         const std::vector<uint32_t> ariths = opt.arith >= 0 ? std::vector<uint32_t>{(uint32_t)opt.arith} : be.arith_candidates();
+        const std::vector<uint32_t> modes = opt.client ? std::vector<uint32_t>{CIP_SCRATCH_X25519}
+                                                       : std::vector<uint32_t>{CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF};
         printf("device %zu: %s\n%10s %8s %8s %8s %12s %14s\n", dev, be.describe().c_str(), "threads", "pairs", "scratch",
                "arith", "memory", "keys/s");
         try {
             SeedStore seeds(counts.back());
-            std::vector<uint32_t> start = make_seeds(seeds, 0, counts.back());
+            std::vector<uint32_t> start = make_seeds(seeds, 0, counts.back(), opt.client);
             double best = 0;
             uint32_t best_t = 0, best_n = 0, best_mode = 0, best_arith = 0;
             for (uint32_t arith : ariths)
                 for (uint32_t t : counts)
-                    for (uint32_t mode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
+                    for (uint32_t mode : modes) {
                         if (g_stop) return 130;
                         uint32_t n = opt.pairs ? opt.pairs : fit_pairs(be, t, mode);
                         double rate = 0;
@@ -777,11 +829,13 @@ struct Candidate {
 bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t smode, uint32_t arith, std::string &log)
 {
     char tag[96];
-    snprintf(tag, sizeof tag, "T=%u N=%u batches=%u scratch=%s arith=%s", T, N, nb, scratch_name(smode), arith_name(arith));
+    const bool client = smode == CIP_SCRATCH_X25519;
+    snprintf(tag, sizeof tag, "T=%u N=%u batches=%u %s arith=%s", T, N, nb,
+             client ? "x25519" : (std::string("scratch=") + scratch_name(smode)).c_str(), arith_name(arith));
     be.set_arith(arith);
-    be.configure(T, N, smode, ed::build_table(N));
+    be.configure(T, N, smode, kernel_table(N, client));
     SeedStore seeds(T);
-    seed_threads(be, seeds, 0, T);
+    seed_threads(be, seeds, 0, T, client);
     std::vector<uint32_t> initial((size_t)T * CIP_STATE_WORDS);
     be.read_state(0, T, initial.data());
 
@@ -798,8 +852,8 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     std::atomic<bool> bad(false);
     parallel_for((uint32_t)all.size(), [&](uint32_t i) {
         Candidate &c = all[i];
-        if (!keys::public_key(c.pk, seeds[c.pos.tid], hit_offset(c.pos, 0, N))) bad = true;
-        c.address = onion::address(c.pk);
+        if (!candidate_key(c.pk, seeds[c.pos.tid], hit_offset(c.pos, 0, N), client)) bad = true;
+        c.address = key_text(c.pk, client);
     });
     if (bad) {
         log += std::string(tag) + ": could not derive reference keys\n";
@@ -851,7 +905,7 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     lists.push_back({wild(stolen(6)), "?d?d" + random_prefix(1), wild(stolen(4)) + "?l?l?l?l?l?l?l?l?l?l?d"});
 
     Lossless lossless{be, [&](uint32_t first, uint32_t count, uint32_t batch) {
-                          restore_threads(be, seeds, first, count, N, [&](uint32_t) { return (uint64_t)batch; });
+                          restore_threads(be, seeds, first, count, N, client, [&](uint32_t) { return (uint64_t)batch; });
                       }};
     for (size_t li = 0; li < lists.size(); li++) {
         const std::vector<std::string> &prefixes = lists[li];
@@ -913,15 +967,16 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     std::vector<uint32_t> final_state((size_t)T * CIP_STATE_WORDS);
     be.read_state(0, T, final_state.data());
     for (uint32_t t = 0; t < T; t++) {
-        uint8_t pk[32], got[32];
-        ed::Affine p, q;
-        if (!keys::public_key(pk, seeds[t], hit_offset(Hit{t, nb, 0}, 0, N)) || !ed::decompress(p, pk)) return false;
-        for (int k = 0; k < 10; k++) {
-            q.x.v[k] = final_state[(size_t)t * CIP_STATE_WORDS + k];
-            q.y.v[k] = final_state[(size_t)t * CIP_STATE_WORDS + 10 + k];
+        uint8_t pk[32];
+        uint32_t want[CIP_STATE_WORDS], got[CIP_STATE_WORDS];
+        if (!keys::public_key(pk, seeds[t], hit_offset(Hit{t, nb, 0}, 0, N)) || !centre_words(want, pk, client)) return false;
+        for (int half = 0; half < 2; half++) {
+            fe a;
+            for (int k = 0; k < 10; k++) a.v[k] = final_state[(size_t)t * CIP_STATE_WORDS + 10 * half + k];
+            a = ed::canonical(a);
+            for (int k = 0; k < 10; k++) got[10 * half + k] = a.v[k];
         }
-        ed::compress(got, q);
-        if (memcmp(got, pk, 32) != 0) {
+        if (memcmp(got, want, sizeof want) != 0) {
             log += std::string(tag) + ": centre of thread " + std::to_string(t) + " is wrong after the launch\n";
             return false;
         }
@@ -942,7 +997,7 @@ bool selftest_exhaustive(Backend &be, std::string &log)
         } catch (const std::exception &) {
             continue;
         }
-        for (uint32_t smode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
+        for (uint32_t smode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF, CIP_SCRATCH_X25519}) {
             uint32_t odd = smode == CIP_SCRATCH_HALF ? 1 : 0;  // half mode needs an even batch size
             if (!exhaustive_case(be, 5, 1 + odd, 3, smode, arith, log) || !exhaustive_case(be, 33, 7 + odd, 2, smode, arith, log) ||
                 !exhaustive_case(be, 64, 48, 3, smode, arith, log) || !exhaustive_case(be, 300, 16, 1, smode, arith, log))

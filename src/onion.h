@@ -17,13 +17,21 @@ std::string address(const uint8_t pk[32]);
 // 0..31 for a base32 character (a-z, 2-7; upper case accepted), -1 otherwise.
 int base32_value(char c);
 
+// `len` bytes in base32: lower case, no padding. 32 bytes give 52 characters.
+std::string base32(const uint8_t *data, size_t len);
+
+// Lower-cases an onion address and strips an optional ".onion"; returns false unless it
+// is 56 characters with the version and checksum of a v3 address.
+bool normalize_address(std::string &address);
+
 // A prefix is a sequence of address characters and wildcards: ?d is a digit (2-7), ?l a
 // letter, ?a either.
 //
 // Lower-cases a prefix and strips an optional ".onion"; returns false (with a message in
 // `err`) if it contains characters that can never appear in an address, a malformed
-// wildcard, or is too long.
-bool normalize_prefix(std::string &prefix, std::string &err);
+// wildcard, or is too long. With `client` the prefix is of an x25519 key in base32, which
+// has 52 characters.
+bool normalize_prefix(std::string &prefix, std::string &err, bool client = false);
 
 // What a normalized prefix allows at each of its positions: bit v is set if the character
 // with base32 value v may stand there.
