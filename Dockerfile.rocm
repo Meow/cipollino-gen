@@ -19,7 +19,7 @@ RUN apt-get update \
 # One code object per GPU family; the generic targets run on every model of a family.
 ARG ROCM_ARCH="gfx9-generic gfx9-4-generic gfx10-1-generic gfx10-3-generic gfx11-generic gfx12-generic"
 WORKDIR /src
-COPY Makefile ./
+COPY Makefile VERSION ./
 COPY src src
 COPY tests tests
 COPY tools tools

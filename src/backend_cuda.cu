@@ -82,9 +82,9 @@ public:
 
     std::string describe() const override { return CIP_API " #" + std::to_string(dev_) + ": " + name_; }
 
-    // Threads per multiprocessor. Measured on an RTX 4090 (128 SMs) in the lean scratch
-    // mode: 512 per SM gives 14.1 G keys/s, 1024 gives 16.0, 2048 gives 16.6, 4096 gives 16.8.
-    // The only AMD device tried, a two-unit iGPU, was fastest at 1024.
+    // Threads per multiprocessor. An RTX 4090 (128 SMs) in the lean scratch mode does
+    // 14.1 G keys/s with 512 per SM, 16.0 with 1024, 16.6 with 2048 and 16.8 with 4096.
+    // A two-unit AMD iGPU is fastest at 1024.
     uint32_t suggested_threads() const override { return (uint32_t)std::max(sm_count_, 1) * kThreadsPerUnit; }
 
     uint64_t scratch_budget() const override
@@ -94,7 +94,7 @@ public:
         return std::min<uint64_t>(free_bytes / 2, (uint64_t)6 << 30);
     }
 
-    // Batches past 512 pairs gain nothing measurable (the inversion is already under 3%),
+    // Batches past 512 pairs gain nothing measurable (the inversion is under 3% there),
     // and the AMD iGPU loses 6% at 1024 against 384 to 512.
     uint32_t suggested_pairs() const override { return CIP_PAIRS; }
 

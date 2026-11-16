@@ -130,6 +130,11 @@ def main():
     rng = random.Random(7)
     alphabet = "abcdefghijklmnopqrstuvwxyz234567"
 
+    # the version is the VERSION file's
+    version = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION")).read().strip()
+    r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stdout == f"cipollino {version}\n", r.stdout
+
     with tempfile.TemporaryDirectory() as tmp:
         # a few prefixes (direct filter mode), stop after exactly N
         out = os.path.join(tmp, "few")

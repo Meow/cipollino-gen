@@ -16,6 +16,13 @@
 #include "onion.h"
 #include "platform.h"
 
+// The build passes the contents of the VERSION file as a bare token.
+#ifndef CIP_VERSION
+#define CIP_VERSION unknown
+#endif
+#define CIP_STRING2(x) #x
+#define CIP_STRING(x) CIP_STRING2(x)
+
 static void usage(FILE *out)
 {
     fputs(
@@ -49,6 +56,7 @@ static void usage(FILE *out)
         "      --verify [DIR...]  check key directories instead of searching: each DIR, or every\n"
         "                      <address>.onion inside it (default: inside the --dir directory)\n"
         "  -q, --quiet         print only the addresses found\n"
+        "  -V, --version\n"
         "  -h, --help\n",
         out);
 }
@@ -147,6 +155,9 @@ int main(int argc, char **argv)
         uint64_t v = 0;
         if (a == "-h" || a == "--help") {
             usage(stdout);
+            return 0;
+        } else if (a == "-V" || a == "--version") {
+            puts("cipollino " CIP_STRING(CIP_VERSION));
             return 0;
         } else if (a == "-n" || a == "--count") {
             value(opt.want);

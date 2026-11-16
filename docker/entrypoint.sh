@@ -14,7 +14,7 @@ for arg in "$@"; do
         -d | --dir) dir=$arg ;;
     esac
     case "$arg" in
-        --bench | --selftest | --tune | -h | --help) search=0 ;;
+        --bench | --selftest | --tune | --verify | -h | --help | -V | --version) search=0 ;;
     esac
     prev=$arg
 done

@@ -57,7 +57,7 @@ public:
 
     // Run `nbatches` batches on the threads first .. first + count - 1 (as many of them as
     // exist) and collect the hits; the other threads do not move. Returns the number of
-    // hits the kernel saw; if that exceeds kHitCap the excess was not recorded.
+    // hits the kernel saw; those beyond kHitCap are counted but not recorded.
     virtual uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) = 0;
     // The same on every thread.
     uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) { return launch(nbatches, hits, 0, UINT32_MAX); }

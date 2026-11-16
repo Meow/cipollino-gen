@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Draw the README's charts: docs/<name>-light.svg and docs/<name>-dark.svg.
+"""Draw the charts of README.md and docs/DESIGN.md: docs/<name>-light.svg and -dark.svg.
 
     python3 tools/gen_charts.py
 
-The numbers are the ones in the README's tables; change them in both places.
+The numbers are the ones in those files' tables and text; change them in both places.
 """
 import math
 import os
@@ -129,30 +129,6 @@ def wait(t):
     return s, "Average wait for one key by prefix length, for two GPUs"
 
 
-def amd(t):
-    """Before and after on one GPU: a dumbbell per API."""
-    rows = [("Vulkan (Mesa)", 43, 90), ("ROCm", 96, 105)]
-    left, right, top = 170, 650, 96
-    s = Svg(t, 206, "One AMD GPU, two APIs", "Radeon 610M, million keys per second, before and after the work described below.")
-    x = lambda v: left + v / 120 * (right - left)
-    bottom = top + 34 * len(rows) + 6
-    for v in (0, 30, 60, 90, 120):
-        s.line(x(v), top - 8, x(v), bottom, t["axis"] if v == 0 else t["grid"])
-        s.text(x(v), bottom + 18, f"{v} M" if v else "0", size=11, fill=t["muted"], anchor="middle")
-    for i, (key, colour) in enumerate((("before", t["soft"]), ("after", t["s1"]))):
-        s.dot(34 + 84 * i, 72, colour)
-        s.text(46 + 84 * i, 76, key, size=12, fill=t["ink2"])
-    for i, (label, before, after) in enumerate(rows):
-        cy = top + 34 * i + 14
-        s.text(left - 14, cy + 4, label, size=12, fill=t["ink2"], anchor="end")
-        s.line(x(before), cy, x(after), cy, t["soft"], width=2)
-        s.dot(x(before), cy, t["soft"])
-        s.dot(x(after), cy, t["s1"])
-        s.text(x(before) - 12, cy + 4, f"{before} M", size=12, fill=t["ink2"], anchor="end")
-        s.text(x(after) + 12, cy + 4, f"{after} M", size=12, weight=600)
-    return s, "Radeon 610M keys per second before and after, Vulkan and ROCm"
-
-
 def energy(t):
     """Where the energy of one key pair goes on the RTX 4090: one stacked bar."""
     parts = [("950 wide multiply-adds", 38, "38 nJ", t["s1"]), ("850 other instructions", 12, "12 nJ", t["s2"]),
@@ -182,7 +158,7 @@ def energy(t):
 def main():
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
     os.makedirs(out, exist_ok=True)
-    for name, draw in (("speed", speed), ("wait", wait), ("amd", amd), ("energy", energy)):
+    for name, draw in (("speed", speed), ("wait", wait), ("energy", energy)):
         for mode, theme in THEMES.items():
             chart, label = draw(theme)
             chart.save(os.path.join(out, f"{name}-{mode}.svg"), label)

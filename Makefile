@@ -41,7 +41,9 @@ ROCM   ?= $(if $(HIPCC),1,0)
 METAL  ?= $(if $(filter Darwin,$(UNAME)),1,0)
 VULKAN ?= $(if $(and $(VULKAN_HEADER),$(shell command -v $(GLSLANG) 2>/dev/null)),1,0)
 
-DEFS     :=
+# The version lives in the VERSION file; main.cpp turns the macro into a string.
+VERSION  := $(shell cat VERSION)
+DEFS     := -DCIP_VERSION=$(VERSION)
 ALLFLAGS = -std=c++17 -Wall -Wextra $(CXXFLAGS) -Isrc -I$(BUILD) $(SODIUM_CFLAGS) $(DEFS)
 LDLIBS   := $(SODIUM_LIBS) -lpthread
 LINK     := $(CXX)

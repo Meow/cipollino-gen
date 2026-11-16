@@ -78,7 +78,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item build\cipollino.exe, README.md, LICENSE dist\
+          Copy-Item build\cipollino.exe, README.md, CHANGELOG.md, LICENSE dist\
 
       - uses: actions/upload-artifact@v7
         with:

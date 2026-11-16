@@ -29,7 +29,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=all
 # 6% slower.)
 ARG CUDA_ARCH=all
 WORKDIR /src
-COPY Makefile ./
+COPY Makefile VERSION ./
 COPY src src
 COPY tests tests
 COPY tools tools

@@ -34,7 +34,7 @@
 //                               with sign 0 for C + Q_i and 1 for C - Q_i
 //   filt    [4 * nfilt]         per prefix: mask_lo, value_lo, mask_hi, value_hi over the
 //                               first 8 public key bytes read as a little-endian u64
-//   bitmap  [2^19]              bitmap mode: one bit per value of the first 3 key bytes
+//   bitmap  [CIP_BITMAP_WORDS]  bitmap mode: the near and the two far bit tables (defs.h)
 
 CIP_FN fe cip_table_load(u32 at CIP_BUFS_DECL)
 {
@@ -241,7 +241,7 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
         fe inv_all = fe_invert(p);
 
         // Backward pass: peel one inverse per pair and finish both of its candidates.
-        // (Fetching the table entry ahead as well as the scratch makes the 4090 slower again.)
+        // (Fetching the table entry ahead as well is slower on an RTX 4090.)
         if (smode == CIP_SCRATCH_FULL) {
             CIP_AHEAD(ahead_p, 2u * N - 2u);
             CIP_AHEAD(ahead_e, 2u * N - 1u);
@@ -268,7 +268,7 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else {
-            // Only the product before each even pair was stored (N is even in this mode).
+            // Only the product before each even pair is stored (N is even in this mode).
             // The one before the odd pair of a block is that times the even pair's
             // denominator, so the even pair's t and d are computed one iteration early
             // and carried over. One pair per iteration keeps the loop body small, which

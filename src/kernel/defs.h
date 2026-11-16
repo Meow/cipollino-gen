@@ -42,8 +42,8 @@ typedef ulong u64;
 typedef uint32_t u32;
 typedef uint64_t u64;
 #define CIP_FN __device__ __forceinline__
-// Spelled out: CUDA's __noinline__ macro has a history of colliding with libstdc++, which
-// writes __attribute__((__noinline__)).
+// Spelled out: CUDA's __noinline__ macro collides with libstdc++, which writes
+// __attribute__((__noinline__)).
 #if defined(_MSC_VER)
 #define CIP_COLD_FN static __device__ __declspec(noinline)
 #else
@@ -142,9 +142,8 @@ typedef uint64_t u64;
 #define CIP_SCRATCH_AOS 0
 #endif
 
-// Whether the backward pass fetches scratch a pair ahead (see search.h). It pays where it
-// was measured to: 9% on an RTX 4090 under CUDA. The same card under Vulkan and an M5 Pro
-// under Metal lose about 1% to it.
+// Whether the backward pass fetches scratch a pair ahead (see search.h). Worth 9% on an
+// RTX 4090 under CUDA; the same card under Vulkan and an M5 Pro under Metal lose 1% to it.
 #ifndef CIP_FETCH_AHEAD
 #if defined(CIP_TARGET_CUDA)
 #define CIP_FETCH_AHEAD 1

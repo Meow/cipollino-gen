@@ -2,7 +2,7 @@
 // NVIDIA, and Apple through MoltenVK). One instance per physical device.
 //
 // The kernel is the shared source compiled to SPIR-V at build time (kernel/entry_vulkan.comp),
-// one module per scratch mode.
+// one module per field arithmetic and scratch mode.
 //
 // On Windows the Vulkan loader (vulkan-1.dll) is installed by the GPU driver, so a machine
 // may have none, and a program that imports it would then not start at all. There the
@@ -209,25 +209,24 @@ public:
     }
 
     // NVIDIA's driver cannot cheaply preempt a running Vulkan compute dispatch. When
-    // something else wants the GPU (a desktop compositor drawing a frame is enough), the
-    // dispatch in flight crawls at about 1/17 of its speed until it ends, and one that
-    // then needs more than several seconds gets the device reset (Xid 109, "CTX SWITCH
-    // TIMEOUT"). Measured on an RTX 4090 that also drives a desktop: 250 ms launches stall
-    // for 4.4 s at a time, 500 ms ones were killed. Short launches bound the damage; CUDA
-    // has no such problem and is what `auto` picks on NVIDIA.
+    // something else wants the GPU (a compositor drawing a frame is enough), the dispatch
+    // in flight crawls at about 1/17 of its speed until it ends, and one that then needs
+    // more than several seconds gets the device reset (Xid 109, "CTX SWITCH TIMEOUT"). On
+    // an RTX 4090 that also drives a desktop, 250 ms launches stall for 4.4 s at a time
+    // and 500 ms ones lose the device. Short launches bound the damage. CUDA has no such
+    // problem and is what `auto` picks on NVIDIA.
     double suggested_launch_seconds() const override
     {
         if (nvidia()) return 0.05;
         return props_.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 0.25 : 0.1;
     }
 
-    // A 32x32 multiply costs an AMD GPU 4.5 additions and a 24-bit one a single addition
-    // (measured on RDNA 2), and Mesa's compiler spends two of the former on every 64-bit
-    // product: the narrow arithmetic is 1.6 times as fast there. AMD's own drivers have a
-    // different compiler, so both are measured. An Apple M5 Pro runs the narrow one at 0.42
-    // of the speed. On NVIDIA it has not been run: by the instruction costs measured on an
-    // RTX 4090 its 400 multiplies need twice the energy of the 100 wide ones. Nothing else
-    // has been tried, so there both are measured as well.
+    // AMD: a 32x32 multiply costs RDNA 2 as much as 4.5 additions and a 24-bit one as
+    // much as one, and Mesa's compiler spends two of the former on every 64-bit product,
+    // so narrow is 1.6 times as fast there. AMD's own drivers have another compiler:
+    // measure both. Apple: an M5 Pro runs narrow at 0.42 of wide's speed. NVIDIA: not
+    // run; by the instruction energies of an RTX 4090 narrow's 400 multiplies cost twice
+    // the 100 wide ones. Anything else is unknown: measure both.
     std::vector<uint32_t> arith_candidates() const override
     {
         if (amd()) return {CIP_ARITH_NARROW, CIP_ARITH_WIDE};
