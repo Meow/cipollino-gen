@@ -207,6 +207,7 @@ CIP_FN void cip_pair(u32 i, fe t, fe inv, fe x1, fe y1, u32 q, u32 tid, u32 batc
 CIP_SMODE_TEMPLATE
 CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
 {
+    if (tid - prm.first >= prm.count) return;  // not in this launch's window of threads
     const u32 T = prm.nthreads;
     const u32 N = prm.npairs;
     const u32 smode = CIP_U32(SMODE);

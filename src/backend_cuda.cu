@@ -165,10 +165,12 @@ public:
               "download state");
     }
 
-    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) override
+    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) override
     {
         use();
         prm_.nbatches = nbatches;
+        prm_.first = first;
+        prm_.count = count;
         check(cudaMemset(hitctr_, 0, 4), "cudaMemset");
         unsigned grid = (prm_.nthreads + kBlock - 1) / kBlock;
         if (smode_ == CIP_SCRATCH_FULL)

@@ -106,15 +106,18 @@ public:
         memcpy(words, &state_[(size_t)tid * CIP_STATE_WORDS], (size_t)count * CIP_STATE_WORDS * 4);
     }
 
-    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) override
+    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) override
     {
         prm_.nbatches = nbatches;
+        prm_.first = first;
+        prm_.count = count;
         uint32_t ctr = 0;
-        std::atomic<uint32_t> next(0);
+        const uint32_t end = (uint32_t)std::min<uint64_t>((uint64_t)first + count, prm_.nthreads);
+        std::atomic<uint32_t> next(first);
         auto body = [&]() {
             for (;;) {
                 uint32_t tid = next.fetch_add(1);
-                if (tid >= prm_.nthreads) break;
+                if (tid >= end) break;
                 run_thread(tid, &ctr);
             }
         };

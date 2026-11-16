@@ -66,6 +66,36 @@ bool dir_writable(const std::string &path, std::string &err)
     return false;
 }
 
+bool read_file(const std::string &path, void *buf, size_t cap, size_t &len, std::string &err)
+{
+    int fd = -1;
+    if (_sopen_s(&fd, path.c_str(), _O_RDONLY | _O_BINARY, _SH_DENYWR, 0) != 0) {
+        err = describe(path);
+        return false;
+    }
+    char *p = (char *)buf, extra;
+    len = 0;
+    for (;;) {
+        int n = len < cap ? _read(fd, p + len, (unsigned)(cap - len)) : _read(fd, &extra, 1);
+        if (n < 0) {
+            err = describe(path);
+            _close(fd);
+            return false;
+        }
+        if (n == 0) break;
+        if (len == cap) {
+            err = path + ": larger than expected";
+            _close(fd);
+            return false;
+        }
+        len += (size_t)n;
+    }
+    _close(fd);
+    return true;
+}
+
+bool open_to_others(const std::string &) { return false; }
+
 bool stderr_is_terminal()
 {
     if (!_isatty(_fileno(stderr))) return false;
@@ -128,8 +158,72 @@ bool dir_writable(const std::string &path, std::string &err)
     return false;
 }
 
+bool read_file(const std::string &path, void *buf, size_t cap, size_t &len, std::string &err)
+{
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        err = describe(path);
+        return false;
+    }
+    char *p = (char *)buf, extra;
+    len = 0;
+    for (;;) {
+        ssize_t n = len < cap ? read(fd, p + len, cap - len) : read(fd, &extra, 1);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            err = describe(path);
+            close(fd);
+            return false;
+        }
+        if (n == 0) break;
+        if (len == cap) {
+            err = path + ": larger than expected";
+            close(fd);
+            return false;
+        }
+        len += (size_t)n;
+    }
+    close(fd);
+    return true;
+}
+
+bool open_to_others(const std::string &path)
+{
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && (st.st_mode & 077) != 0;
+}
+
 bool stderr_is_terminal() { return isatty(STDERR_FILENO) != 0; }
 
 }  // namespace plat
 
 #endif
+
+// ---- the same on every system ------------------------------------------------------------
+
+#include <algorithm>
+#include <filesystem>
+
+namespace plat {
+
+bool exists(const std::string &path)
+{
+    std::error_code ec;
+    return std::filesystem::exists(path, ec);
+}
+
+bool list_subdirs(const std::string &path, std::vector<std::string> &names, std::string &err)
+{
+    std::error_code ec;
+    names.clear();
+    for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_directory(ec)) names.push_back(it->path().filename().string());
+    if (ec) {
+        err = path + ": " + ec.message();
+        return false;
+    }
+    std::sort(names.begin(), names.end());
+    return true;
+}
+
+}  // namespace plat

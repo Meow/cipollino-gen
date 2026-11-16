@@ -8,6 +8,7 @@ import base64
 import hashlib
 import os
 import random
+import shutil
 import stat
 import subprocess
 import sys
@@ -160,6 +161,68 @@ def main():
         r = run(binary, backend, ["-d", out, "onio"])
         (d,) = os.listdir(out)
         check_key_dir(os.path.join(out, d), ["onio"])
+
+        # a prefix so short that a launch holds far more hits than the device records:
+        # the search has to take the launches in pieces and still hand out sound keys
+        out = os.path.join(tmp, "short")
+        r = run(binary, backend, ["-n", "40", "-d", out, "c"])
+        dirs = sorted(os.listdir(out))
+        assert len(dirs) == 40 and sorted(r.stdout.split()) == dirs
+        short = [check_key_dir(os.path.join(out, d), ["c"]) for d in dirs]
+        assert len({sk[32:] for _, sk in short}) == 40, "two keys share a nonce prefix"
+
+        # --verify accepts what was just written, one directory or a directory of them
+        r = run(binary, backend, ["--verify", "-d", out])
+        assert r.stdout.count("ok    ") == 40 and "FAIL" not in r.stdout, r.stdout
+        good = os.path.join(out, dirs[0])
+        r = run(binary, backend, ["--verify", good, os.path.join(out, dirs[1])])
+        assert r.stdout.count("ok    ") == 2 and dirs[0] in r.stdout and dirs[1] in r.stdout, r.stdout
+
+        # ... and rejects every way of damaging one
+        def damaged(name, change):
+            bad = os.path.join(tmp, "damaged-" + name, dirs[0])
+            shutil.copytree(good, bad)
+            change(bad)
+            r = run(binary, backend, ["--verify", bad], expect=1)
+            assert "FAIL" in r.stdout and "ok    " not in r.stdout, (name, r.stdout)
+
+        def flip(file, at):
+            def change(d):
+                path = os.path.join(d, file)
+                data = bytearray(open(path, "rb").read())
+                data[at] ^= 1
+                os.chmod(path, 0o600)
+                open(path, "wb").write(data)
+            return change
+
+        def rewrite(file, data):
+            def change(d):
+                os.chmod(os.path.join(d, file), 0o600)
+                open(os.path.join(d, file), "wb").write(data)
+            return change
+
+        damaged("scalar", flip("hs_ed25519_secret_key", 40))
+        damaged("secret-header", flip("hs_ed25519_secret_key", 3))
+        damaged("public", flip("hs_ed25519_public_key", 50))
+        damaged("public-header", flip("hs_ed25519_public_key", 3))
+        damaged("hostname", rewrite("hostname", (dirs[1] + "\n").encode()))
+        damaged("short-secret", rewrite("hs_ed25519_secret_key", open(os.path.join(good, "hs_ed25519_secret_key"), "rb").read()[:-1]))
+        damaged("long-public", rewrite("hs_ed25519_public_key", open(os.path.join(good, "hs_ed25519_public_key"), "rb").read() + b"\0"))
+        damaged("no-hostname", lambda d: os.remove(os.path.join(d, "hostname")))
+        # another directory's public key and hostname: consistent with each other, not with the secret
+        def foreign(d):
+            for file in ("hs_ed25519_public_key", "hostname"):
+                rewrite(file, open(os.path.join(out, dirs[1], file), "rb").read())(d)
+        damaged("foreign-public", foreign)
+        run(binary, backend, ["--verify", tmp + "/damaged-scalar"], expect=1)
+        os.mkdir(os.path.join(tmp, "empty"))
+        run(binary, backend, ["--verify", os.path.join(tmp, "empty")], expect=1)
+
+        # the nonce prefix is not covered by any public value, so a changed one still verifies
+        intact = os.path.join(tmp, "nonce", dirs[0])
+        shutil.copytree(good, intact)
+        flip("hs_ed25519_secret_key", 80)(intact)
+        run(binary, backend, ["--verify", intact])
 
         # bad input is rejected before any work happens
         for bad in (["abc1"], ["has space"], ["a" * 57], []):

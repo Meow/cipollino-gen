@@ -54,4 +54,12 @@ bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std:
 // Returns false with a message in `err`.
 bool write_tor_dir(const std::string &dir, const Key &key, std::string &err);
 
+// Check a HiddenServiceDir, whoever wrote it: the three files have Tor's headers and
+// lengths, the public key is the secret scalar's, it is a canonical point of the
+// prime-order group, a signature made with the secret key verifies under it, and the
+// hostname is its address. On success `address` is that address (without ".onion") and
+// `notes` lists what is unusual but does not make the key wrong; otherwise `err` says
+// which check failed.
+bool verify_tor_dir(const std::string &dir, std::string &address, std::vector<std::string> &notes, std::string &err);
+
 }  // namespace keys

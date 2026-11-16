@@ -194,8 +194,8 @@ struct cip_params {
     u32 nfilt;     // number of filter records in the filter buffer
     u32 mode;      // CIP_MODE_*
     u32 hitcap;    // capacity of the hit buffer, in records
-    u32 pad0;
-    u32 pad1;
+    u32 first;     // the launch runs the threads first .. first + count - 1 and leaves
+    u32 count;     // every other thread's state alone
     u32 dm[12];    // direct modes: low-32 masks (unused entries: mask 0 / value 1, never match)
     u32 dv[12];    // direct modes: low-32 values
 };

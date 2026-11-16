@@ -92,10 +92,12 @@ public:
         memcpy(words, (uint32_t *)[state_ contents] + (size_t)tid * CIP_STATE_WORDS, (size_t)count * CIP_STATE_WORDS * 4);
     }
 
-    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) override
+    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) override
     {
         @autoreleasepool {
             prm_.nbatches = nbatches;
+            prm_.first = first;
+            prm_.count = count;
             *(uint32_t *)[hitctr_ contents] = 0;
             id<MTLCommandBuffer> cb = [queue_ commandBuffer];
             id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];

@@ -156,12 +156,28 @@ cipollino [options] PREFIX [PREFIX...]
       --bench [SECS]  measure throughput, write nothing
       --tune          try thread counts and scratch modes, print the fastest as flags
       --selftest      cross-check the backend against libsodium exhaustively, then exit
+      --verify [DIR...]  check key directories instead of searching
   -q, --quiet         print only the addresses found
 ```
 
 Prefixes use the onion alphabet (`a-z`, `2-7`); upper case and a trailing `.onion` are
 accepted. Found addresses go to stdout, everything else to stderr. Exit status is 0 when
 the requested number of keys was found, 130 when interrupted first.
+
+The progress line ends in an estimate such as `1 key per 6.5 h (50% within 4.5 h, 95%
+within 19.5 h)`: the average wait at the current rate, and the waits that half and 95% of
+all searches stay under (0.69 and 3.0 times the average). The search has no memory, so
+the estimate counts from now however long it has already run.
+
+`--verify` checks key directories instead of searching, whoever wrote them: each `DIR`
+given, or every `<address>.onion` inside it, and without arguments those inside the
+`--dir` directory. A directory passes if its three files have Tor's headers and lengths,
+the public key is the one the secret scalar gives, it is a canonical point of the
+prime-order group, a signature made with the secret key verifies, and `hostname` is the
+key's address. Modes that let other users in and a scalar that is not clamped are
+reported as notes. The exit status is 1 if any directory fails. One thing no check can
+see is damage to the second half of the secret key, the nonce prefix: nothing public
+depends on it.
 
 Every extra character multiplies the work by 32:
 
@@ -174,6 +190,12 @@ Every extra character multiplies the work by 32:
 | 10 | 1.1e15 | 8.7 days | 19 h |
 | 11 | 3.6e16 | 9 months | 25 days |
 | 12 | 1.2e18 | 24 years | 2.2 years |
+
+A device records at most 4096 hits per launch and only counts the rest. For a very short
+prefix (up to three or four characters, depending on the device) one launch holds more
+than that, so such searches take their launches in pieces sized for half the buffer:
+fewer batches, then some of the threads at a time. A piece that reports more hits than it could record all the same is undone (its
+threads are put back where they started) and run again in two halves, so no hit is lost.
 
 Searching for several prefixes at once divides the time to the *first* hit by the number
 of (equally long) prefixes, as long as the rate holds. On the M5 Pro it does, up to
@@ -344,7 +366,8 @@ found by the search, with the seed's nonce prefix. The secret scalar is thus a u
 random clamped scalar, conditioned only on its public key having the prefix.
 
 **One key per seed.** Two keys derived from one seed would have scalars a known distance
-apart and share a nonce prefix, which links them and can leak both keys once both sign.
+apart and share a nonce prefix, which links them, gives away all of them when one leaks,
+and gives away both of any two that ever sign the same message.
 So a seed is retired the moment it yields a key and that thread is reseeded; a second
 hit from the same thread in the same launch is discarded.
 
@@ -429,8 +452,11 @@ make docker-rocm-test   # ROCm and Vulkan in the ROCm container
   means the generator's bounds hold for it.
 - `--selftest` on the CPU backend and every GPU backend in the build (with every
   multiplication the backend has), on the CUDA backend compiled against
-  `tests/cuda_sim.h`, and on a CPU backend built with the narrow multiplication.
-- `tests/test_cli.py`: end-to-end runs, re-verified in Python.
+  `tests/cuda_sim.h`, and on a CPU backend built with the narrow multiplication. One of
+  its prefix lists matches half of all keys, which overflows the hit buffer and has to
+  come out complete all the same.
+- `tests/test_cli.py`: end-to-end runs, re-verified in Python, and `--verify` against
+  intact and damaged key directories.
 
 ## Layout
 

@@ -151,4 +151,57 @@ bool write_tor_dir(const std::string &dir, const Key &key, std::string &err)
     return ok;
 }
 
+bool verify_tor_dir(const std::string &dir, std::string &address, std::vector<std::string> &notes, std::string &err)
+{
+    static const uint8_t pub_tag[32] = "== ed25519v1-public: type0 ==";
+    static const uint8_t sec_tag[32] = "== ed25519v1-secret: type0 ==";
+    static const uint8_t msg[] = "cipollino key validation";
+    uint8_t pub[32 + 32], sec[32 + 64], pk[32], sig[64];
+    char host[128];
+    size_t pub_len = 0, sec_len = 0, host_len = 0;
+    notes.clear();
+
+    bool ok = plat::read_file(dir + "/hs_ed25519_secret_key", sec, sizeof sec, sec_len, err) &&
+              plat::read_file(dir + "/hs_ed25519_public_key", pub, sizeof pub, pub_len, err) &&
+              plat::read_file(dir + "/hostname", host, sizeof host, host_len, err);
+    if (ok && (sec_len != sizeof sec || memcmp(sec, sec_tag, 32) != 0)) {
+        err = "hs_ed25519_secret_key is not a 96-byte Tor secret key file";
+        ok = false;
+    }
+    if (ok && (pub_len != sizeof pub || memcmp(pub, pub_tag, 32) != 0)) {
+        err = "hs_ed25519_public_key is not a 64-byte Tor public key file";
+        ok = false;
+    }
+    const uint8_t *sk = sec + 32;
+    if (ok && (crypto_scalarmult_ed25519_base_noclamp(pk, sk) != 0 || sodium_memcmp(pk, pub + 32, 32) != 0)) {
+        err = "the public key file does not hold the public key of the secret key";
+        ok = false;
+    }
+    if (ok && crypto_core_ed25519_is_valid_point(pk) != 1) {
+        err = "the public key is not a canonical point of the prime-order group";
+        ok = false;
+    }
+    if (ok && (!sign_expanded(sig, msg, sizeof msg, sk, pk) ||
+               crypto_sign_ed25519_verify_detached(sig, msg, sizeof msg, pk) != 0)) {
+        err = "a signature made with the secret key does not verify";
+        ok = false;
+    }
+    if (ok) {
+        address = onion::address(pk);
+        std::string name(host, host_len);
+        while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) name.pop_back();
+        if (name != address + ".onion") {
+            err = "hostname says " + name + ", the key's address is " + address + ".onion";
+            ok = false;
+        }
+    }
+    if (ok) {
+        if ((sk[0] & 7) != 0 || (sk[31] & 0xc0) != 0x40) notes.push_back("the secret scalar is not in clamped form");
+        if (plat::open_to_others(dir)) notes.push_back("the directory is open to other users; Tor insists on mode 0700");
+        if (plat::open_to_others(dir + "/hs_ed25519_secret_key")) notes.push_back("the secret key file is open to other users");
+    }
+    sodium_memzero(sec, sizeof sec);
+    return ok;
+}
+
 }  // namespace keys

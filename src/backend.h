@@ -55,9 +55,12 @@ public:
     virtual void write_state(uint32_t tid, uint32_t count, const uint32_t *words) = 0;
     virtual void read_state(uint32_t tid, uint32_t count, uint32_t *words) = 0;
 
-    // Run `nbatches` batches on every thread and collect the hits. Returns the number of
-    // hits the kernel saw; if that exceeds kHitCap the excess was dropped.
-    virtual uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) = 0;
+    // Run `nbatches` batches on the threads first .. first + count - 1 (as many of them as
+    // exist) and collect the hits; the other threads do not move. Returns the number of
+    // hits the kernel saw; if that exceeds kHitCap the excess was not recorded.
+    virtual uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) = 0;
+    // The same on every thread.
+    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) { return launch(nbatches, hits, 0, UINT32_MAX); }
 };
 
 // Each returns an empty list if the backend is not compiled in or finds no device.

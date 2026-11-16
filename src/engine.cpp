@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <random>
 #include <stdexcept>
@@ -141,6 +142,69 @@ void seed_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count)
     be.write_state(first, count, words.data());
 }
 
+// Put the threads first .. first + count - 1 back where they stand after
+// `batches_of(thread)` batches from their seeds: the centres are derived again from the
+// secret scalars, as the reference keys of the self-tests are.
+template <class F>
+void restore_threads(Backend &be, SeedStore &seeds, uint32_t first, uint32_t count, uint32_t npairs, F batches_of)
+{
+    std::vector<uint32_t> words((size_t)count * CIP_STATE_WORDS);
+    std::atomic<bool> failed(false);
+    parallel_for(count, [&](uint32_t i) {
+        uint8_t pk[32];
+        ed::Affine p;
+        if (!keys::public_key(pk, seeds[first + i], hit_offset(Hit{first + i, 0, 0}, batches_of(first + i), npairs)) ||
+            !ed::decompress(p, pk)) {
+            failed = true;
+            return;
+        }
+        for (int k = 0; k < 10; k++) {
+            words[(size_t)i * CIP_STATE_WORDS + k] = p.x.v[k];
+            words[(size_t)i * CIP_STATE_WORDS + 10 + k] = p.y.v[k];
+        }
+    });
+    if (failed) throw std::runtime_error("failed to derive a thread's position again (this should be impossible)");
+    be.write_state(first, count, words.data());
+}
+
+// Launches that lose no hit. A device records at most Backend::kHitCap hits per launch
+// and only counts the rest, so a launch that reports more has lost some. Its threads are
+// then put back where they started and the same keys are run again in two halves, of the
+// batches or, once it is down to one batch, of the threads, until every part fits.
+struct Lossless {
+    Backend &be;
+    // restore(first, count, batch): put those threads back to the start of batch `batch`
+    // of the launch in progress.
+    std::function<void(uint32_t, uint32_t, uint32_t)> restore;
+    uint64_t replays = 0;  // launches that had to be run again
+    uint64_t dropped = 0;  // hits lost all the same: one thread's single batch overflowed
+
+    // Runs batches b0 .. b0 + nb - 1 of the launch on threads first .. first + count - 1
+    // and appends the hits to `out`, their batch numbers counted from the launch's start.
+    void run(uint32_t first, uint32_t count, uint32_t b0, uint32_t nb, std::vector<Hit> &out)
+    {
+        std::vector<Hit> part;
+        uint32_t n = be.launch(nb, part, first, count);
+        if (n > part.size() && (nb > 1 || count > 1)) {
+            replays++;
+            restore(first, count, b0);
+            if (nb > 1) {
+                run(first, count, b0, nb / 2, out);
+                run(first, count, b0 + nb / 2, nb - nb / 2, out);
+            } else {
+                run(first, count / 2, b0, 1, out);
+                run(first + count / 2, count - count / 2, b0, 1, out);
+            }
+            return;
+        }
+        if (n > part.size()) dropped += n - part.size();
+        for (Hit h : part) {
+            h.batch += b0;
+            out.push_back(h);
+        }
+    }
+};
+
 const char *scratch_name(uint32_t smode)
 {
     return smode == CIP_SCRATCH_FULL ? "full" : smode == CIP_SCRATCH_LEAN ? "lean" : "half";
@@ -205,6 +269,7 @@ struct Shared {
     std::atomic<uint64_t> found{0};
     std::atomic<uint64_t> mismatches{0};
     std::atomic<uint64_t> overflowed{0};
+    std::atomic<uint64_t> replays{0};
     std::atomic<bool> stop{false};
     std::atomic<bool> failed{false};
     std::mutex out_mu;
@@ -430,59 +495,81 @@ private:
     {
         const Options &opt = sh_.opt;
         const double target = opt.launch_seconds > 0 ? opt.launch_seconds : be_.suggested_launch_seconds();
-        const uint64_t per_batch = (uint64_t)T_ * (2 * (uint64_t)N_ + 1);
+        const uint64_t per_thread = 2 * (uint64_t)N_ + 1;
+
+        // Hits are rare for any prefix worth a GPU. For the short ones the launches are
+        // kept small enough that half the hit buffer is expected to do: fewer batches, and
+        // below one batch a window of the threads at a time. Chance can still overflow the
+        // buffer; such a launch is then run again in parts (Lossless).
+        const double per_batch_hits = (double)T_ * (double)per_thread * sh_.p_match;
+        const double budget = Backend::kHitCap / 2.0;
+        const uint32_t window = per_batch_hits > budget ? (uint32_t)std::max(1.0, T_ * budget / per_batch_hits) : T_;
+        const double nb_limit = window < T_ ? 1.0 : std::min(16384.0, std::max(1.0, budget / std::max(per_batch_hits, 1e-300)));
+
+        Lossless lossless{be_, [this](uint32_t first, uint32_t count, uint32_t batch) {
+                              restore_threads(be_, *seeds_, first, count, N_,
+                                              [&](uint32_t t) { return batches_ - base_[t] + batch; });
+                          }};
         uint32_t nb = 1;
         std::vector<Hit> hits;
         std::vector<uint8_t> burned(T_, 0);
         std::vector<uint32_t> burned_list;
         double busy = 0;
-        uint64_t batches_run = 0;
+        uint64_t keys_run = 0;
 
         while (!sh_.stop && !g_stop) {
-            double t0 = now();
-            uint32_t n = be_.launch(nb, hits);
-            double dt = now() - t0;
-            if (n > hits.size()) sh_.overflowed += n - hits.size();
-            busy += dt;
-            batches_run += nb;
+            double dt = 0;
+            // One round moves every thread by nb batches, a window of threads at a time.
+            for (uint32_t first = 0; first < T_ && !sh_.stop && !g_stop; first += window) {
+                const uint32_t count = std::min(window, T_ - first);
+                hits.clear();
+                double t0 = now();
+                lossless.run(first, count, 0, nb, hits);
+                dt += now() - t0;
+                keys_run += (uint64_t)count * per_thread * nb;
 
-            for (const Hit &h : hits) {
-                if (sh_.stop) break;
-                if (!hit_plausible(h, T_, N_, nb)) {
-                    report_mismatch(h, "out-of-range hit record");
-                    continue;
+                for (const Hit &h : hits) {
+                    if (sh_.stop) break;
+                    if (!hit_plausible(h, T_, N_, nb) || h.tid - first >= count) {
+                        report_mismatch(h, "out-of-range hit record");
+                        continue;
+                    }
+                    if (burned[h.tid]) continue;  // one key per seed, ever
+                    keys::Key key;
+                    std::string why;
+                    if (!keys::finalize(key, (*seeds_)[h.tid], hit_offset(h, batches_ - base_[h.tid], N_), opt.prefixes, why)) {
+                        // A prefix longer than the 64 bits the GPU compares can pass the GPU
+                        // filter and still fail here; anything else means the device computed
+                        // something the CPU cannot reproduce.
+                        if (key.address.empty() || !sh_.filter.matches(key.pk)) report_mismatch(h, why);
+                        continue;
+                    }
+                    burned[h.tid] = 1;
+                    burned_list.push_back(h.tid);
+                    if (opt.bench_seconds > 0) continue;
+                    deliver(key);
                 }
-                if (burned[h.tid]) continue;  // one key per seed, ever
-                keys::Key key;
-                std::string why;
-                if (!keys::finalize(key, (*seeds_)[h.tid], hit_offset(h, batches_ - base_[h.tid], N_), opt.prefixes, why)) {
-                    // A prefix longer than the 64 bits the GPU compares can pass the GPU
-                    // filter and still fail here; anything else means the device computed
-                    // something the CPU cannot reproduce.
-                    if (key.address.empty() || !sh_.filter.matches(key.pk)) report_mismatch(h, why);
-                    continue;
+                sh_.tested += (uint64_t)count * per_thread * nb;
+
+                // Retire every seed that produced a key and start those threads afresh:
+                // they run next in the following round.
+                for (uint32_t tid : burned_list) {
+                    seed_threads(be_, *seeds_, tid, 1);
+                    base_[tid] = batches_ + nb;
+                    burned[tid] = 0;
                 }
-                burned[h.tid] = 1;
-                burned_list.push_back(h.tid);
-                if (opt.bench_seconds > 0) continue;
-                deliver(key);
+                burned_list.clear();
             }
             batches_ += nb;
-            sh_.tested += per_batch * nb;
-
-            // Retire every seed that produced a key and start those threads afresh.
-            for (uint32_t tid : burned_list) {
-                seed_threads(be_, *seeds_, tid, 1);
-                base_[tid] = batches_;
-                burned[tid] = 0;
-            }
-            burned_list.clear();
+            busy += dt;
 
             double ideal = nb * target / std::max(dt, 1e-6);
-            nb = (uint32_t)std::lround(std::min(std::max(std::min(ideal, nb * 4.0), 1.0), 16384.0));
+            nb = (uint32_t)std::lround(std::min(std::max(std::min(ideal, nb * 4.0), 1.0), nb_limit));
         }
+        sh_.replays += lossless.replays;
+        sh_.overflowed += lossless.dropped;
         std::lock_guard<std::mutex> lock(sh_.out_mu);
-        sh_.launch_rate += (double)per_batch * (double)batches_run / std::max(busy, 1e-9);
+        sh_.launch_rate += (double)keys_run / std::max(busy, 1e-9);
     }
 
     void deliver(const keys::Key &key)
@@ -577,11 +664,13 @@ int run_search(std::vector<std::unique_ptr<Backend>> &backends, const Options &o
         last_time = last_print = t;
         if (tested == 0) continue;
         char buf[512];
+        // The wait for the next key is exponentially distributed: half of all waits are
+        // shorter than ln 2 times the average, 95% shorter than ln 20 times.
         double mean = 1.0 / (sh.p_match * std::max(rate, 1.0));
-        snprintf(buf, sizeof buf, "%s | %s tested in %s | found %llu%s | 1 key per %s on average",
+        snprintf(buf, sizeof buf, "%s | %s tested in %s | found %llu%s | 1 key per %s (50%% within %s, 95%% within %s)",
                  human(rate, "keys/s").c_str(), human((double)tested, "").c_str(), duration(t - start).c_str(),
                  (unsigned long long)sh.found.load(), opt.want ? ("/" + std::to_string(opt.want)).c_str() : "",
-                 duration(mean).c_str());
+                 duration(mean).c_str(), duration(mean * std::log(2.0)).c_str(), duration(mean * std::log(20.0)).c_str());
         std::lock_guard<std::mutex> lock(sh.out_mu);
         if (sh.tty)
             fprintf(stderr, "\r\033[K%s", buf);
@@ -602,9 +691,11 @@ int run_search(std::vector<std::unique_ptr<Backend>> &backends, const Options &o
         if (!bench) fprintf(stderr, ", %llu key%s found", (unsigned long long)sh.found.load(), sh.found == 1 ? "" : "s");
         fprintf(stderr, "\n");
     }
+    if (sh.replays && !opt.quiet)
+        fprintf(stderr, "note: %llu launches held more hits than the %u a device records and were run again in parts.\n",
+                (unsigned long long)sh.replays.load(), Backend::kHitCap);
     if (sh.overflowed)
-        fprintf(stderr, "note: %llu hits were dropped because more than %u arrived in one launch; "
-                        "prefixes this short do not need a GPU.\n",
+        fprintf(stderr, "note: %llu hits were dropped: a single thread found more than %u in one batch.\n",
                 (unsigned long long)sh.overflowed.load(), Backend::kHitCap);
     if (sh.mismatches)
         fprintf(stderr, "warning: %llu device hits failed CPU validation and were discarded.\n",
@@ -744,7 +835,15 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     std::vector<std::string> dozen;
     for (int i = 0; i < 12; i++) dozen.push_back(i == 0 || i == 4 || i == 11 ? stolen(5 + i) : random_prefix(3));
     lists.push_back(dozen);
+    // Half of all keys: in the larger cases that is more hits than a launch can record,
+    // and the launch has to be run again in halves of its batches and of its threads.
+    std::vector<std::string> dense;
+    for (int i = 0; i < 16; i++) dense.push_back(std::string(1, "abcdefghijklmnopqrstuvwxyz234567"[2 * i + (int)(rng() & 1)]));
+    lists.push_back(dense);
 
+    Lossless lossless{be, [&](uint32_t first, uint32_t count, uint32_t batch) {
+                          restore_threads(be, seeds, first, count, N, [&](uint32_t) { return (uint64_t)batch; });
+                      }};
     for (size_t li = 0; li < lists.size(); li++) {
         const std::vector<std::string> &prefixes = lists[li];
         Filter f = build_filter(prefixes);
@@ -777,14 +876,19 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
         be.write_state(0, T, initial.data());
         be.set_filter(f);
         std::vector<Hit> got;
-        uint32_t n = be.launch(nb, got);
+        const uint64_t replays_before = lossless.replays;
+        lossless.run(0, T, 0, nb, got);
         std::sort(got.begin(), got.end(), hit_less);
-        if (n != want.size() || got.size() != want.size() || !std::equal(got.begin(), got.end(), want.begin(), hit_equal)) {
+        if (got.size() != want.size() || !std::equal(got.begin(), got.end(), want.begin(), hit_equal)) {
             char buf[256];
-            snprintf(buf, sizeof buf, "%s: prefix list %zu (%s mode): expected %zu hits, device reported %u%s\n", tag, li,
-                     f.mode == CIP_MODE_BITMAP ? "bitmap" : "direct", want.size(), n,
-                     n == want.size() ? " but different ones" : "");
+            snprintf(buf, sizeof buf, "%s: prefix list %zu (%s mode): expected %zu hits, device reported %zu%s\n", tag, li,
+                     f.mode == CIP_MODE_BITMAP ? "bitmap" : "direct", want.size(), got.size(),
+                     got.size() == want.size() ? " but different ones" : "");
             log += buf;
+            return false;
+        }
+        if ((want.size() > Backend::kHitCap) != (lossless.replays > replays_before) || lossless.dropped) {
+            log += std::string(tag) + ": prefix list " + std::to_string(li) + ": a launch was run again without need, or not when needed\n";
             return false;
         }
         if (want.empty() && li != 0) {  // every list but the first contains a prefix taken from a real candidate
@@ -810,7 +914,8 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
             return false;
         }
     }
-    log += std::string(tag) + ": ok (" + std::to_string(all.size()) + " keys, " + std::to_string(lists.size()) + " prefix lists)\n";
+    log += std::string(tag) + ": ok (" + std::to_string(all.size()) + " keys, " + std::to_string(lists.size()) + " prefix lists" +
+           (lossless.replays ? ", " + std::to_string(lossless.replays) + " launches run again" : "") + ")\n";
     return true;
 }
 

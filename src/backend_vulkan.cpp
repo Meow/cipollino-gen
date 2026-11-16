@@ -291,9 +291,11 @@ public:
         download(state_, (size_t)tid * CIP_STATE_WORDS * 4, words, (size_t)count * CIP_STATE_WORDS * 4);
     }
 
-    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits) override
+    uint32_t launch(uint32_t nbatches, std::vector<Hit> &hits, uint32_t first, uint32_t count) override
     {
         prm_.nbatches = nbatches;
+        prm_.first = first;
+        prm_.count = count;
         *(uint32_t *)hitctr_.map = 0;
 
         begin();

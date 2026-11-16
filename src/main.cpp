@@ -12,7 +12,9 @@
 #include "backend.h"
 #include "ed.h"
 #include "engine.h"
+#include "keys.h"
 #include "onion.h"
+#include "platform.h"
 
 static void usage(FILE *out)
 {
@@ -44,6 +46,8 @@ static void usage(FILE *out)
         "      --bench [SECS]  measure throughput for SECS seconds (default 10), write nothing\n"
         "      --tune          try thread counts and scratch modes, print the fastest as flags\n"
         "      --selftest      cross-check the backend against libsodium exhaustively, then exit\n"
+        "      --verify [DIR...]  check key directories instead of searching: each DIR, or every\n"
+        "                      <address>.onion inside it (default: inside the --dir directory)\n"
         "  -q, --quiet         print only the addresses found\n"
         "  -h, --help\n",
         out);
@@ -64,6 +68,51 @@ static bool known_answers()
     return onion::address(pk) == "aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dyp3kead";
 }
 
+// Check key directories: every argument is one, or holds some. Returns a process exit code.
+static int run_verify(std::vector<std::string> dirs, const std::string &outdir)
+{
+    if (dirs.empty()) dirs.push_back(outdir);
+    std::vector<std::string> found;
+    for (const std::string &d : dirs) {
+        if (plat::exists(d + "/hs_ed25519_secret_key")) {
+            found.push_back(d);
+            continue;
+        }
+        std::vector<std::string> names;
+        std::string err;
+        if (!plat::list_subdirs(d, names, err)) {
+            fprintf(stderr, "error: %s\n", err.c_str());
+            return 1;
+        }
+        size_t before = found.size();
+        for (const std::string &n : names)
+            if (n.size() > 6 && n.compare(n.size() - 6, 6, ".onion") == 0) found.push_back(d + "/" + n);
+        if (found.size() == before) {
+            fprintf(stderr, "error: %s is not a key directory and holds none\n", d.c_str());
+            return 1;
+        }
+    }
+    size_t bad = 0;
+    for (const std::string &d : found) {
+        std::string address, err;
+        std::vector<std::string> notes;
+        if (keys::verify_tor_dir(d, address, notes, err)) {
+            // A directory named after another address is not wrong for Tor, but is for its owner.
+            size_t slash = d.find_last_of("/\\");
+            std::string name = slash == std::string::npos ? d : d.substr(slash + 1);
+            if (name.size() == 62 && name != address + ".onion") notes.push_back("the directory is named after another address");
+            printf("ok    %s.onion  %s\n", address.c_str(), d.c_str());
+            for (const std::string &n : notes) printf("      note: %s\n", n.c_str());
+        } else {
+            printf("FAIL  %s: %s\n", d.c_str(), err.c_str());
+            bad++;
+        }
+    }
+    fflush(stdout);
+    if (found.size() > 1 || bad) fprintf(stderr, "%zu of %zu key directories are good\n", found.size() - bad, found.size());
+    return bad ? 1 : 0;
+}
+
 static bool parse_u64(const char *s, uint64_t &v)
 {
     char *end = nullptr;
@@ -78,7 +127,7 @@ int main(int argc, char **argv)
     std::string backend = "auto";
     std::vector<int> devices;
     std::vector<std::string> raw;
-    bool selftest = false, tune = false;
+    bool selftest = false, tune = false, verify = false;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -169,6 +218,8 @@ int main(int argc, char **argv)
             selftest = true;
         } else if (a == "--tune") {
             tune = true;
+        } else if (a == "--verify") {
+            verify = true;
         } else if (a == "-q" || a == "--quiet") {
             opt.quiet = true;
         } else if (a.size() > 1 && a[0] == '-') {
@@ -178,6 +229,14 @@ int main(int argc, char **argv)
         } else {
             raw.push_back(a);
         }
+    }
+
+    if (verify) {
+        if (sodium_init() < 0 || !known_answers()) {
+            fprintf(stderr, "error: libsodium or the address encoding failed its start-up check\n");
+            return 1;
+        }
+        return run_verify(raw, opt.outdir);
     }
 
     for (std::string &p : raw) {

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace plat {
 
@@ -16,6 +17,20 @@ bool write_new_file(const std::string &path, const void *data, size_t len, std::
 
 // Whether files can be created in the directory.
 bool dir_writable(const std::string &path, std::string &err);
+
+// Read a file of at most `cap` bytes into `buf` without leaving copies of it in library
+// buffers; `len` is its size. A longer file is an error.
+bool read_file(const std::string &path, void *buf, size_t cap, size_t &len, std::string &err);
+
+// Whether there is a file or directory of that name.
+bool exists(const std::string &path);
+
+// The names of the directories inside `path`, sorted.
+bool list_subdirs(const std::string &path, std::vector<std::string> &names, std::string &err);
+
+// Whether the file mode lets anyone but the owner in. Always false on Windows, which has
+// access lists instead.
+bool open_to_others(const std::string &path);
 
 // True if stderr is a terminal that understands "\r" and ANSI erase-line; on Windows this
 // also switches the console into that mode.
