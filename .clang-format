@@ -1,6 +1,3 @@
-# The style of github.com/Meow/assemblia, without its restriction to C++: it also covers
-# the Objective-C++ of the Metal backend. `make format` applies it. Not formatted:
-# src/kernel/field13.h, which is generated, and the GLSL entry point.
 ---
 AlignAfterOpenBracket: BlockIndent
 AlignEscapedNewlines: Left
