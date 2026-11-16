@@ -286,17 +286,17 @@ struct Shared {
     explicit Shared(const Options &o) : opt(o) {}
     const Options &opt;
     Filter filter;
-    double p_match = 0;
-    bool tty = false;
+    std::mutex out_mu;
     std::atomic<uint64_t> tested{0};
     std::atomic<uint64_t> found{0};
     std::atomic<uint64_t> mismatches{0};
     std::atomic<uint64_t> overflowed{0};
     std::atomic<uint64_t> replays{0};
+    double p_match = 0;
+    double launch_rate = 0;  // sum over devices of keys per second of launch time
     std::atomic<bool> stop{false};
     std::atomic<bool> failed{false};
-    std::mutex out_mu;
-    double launch_rate = 0;  // sum over devices of keys per second of launch time
+    bool tty = false;
 
     void say(const std::string &line)
     {
@@ -448,8 +448,8 @@ private:
     void pick_scratch(const std::vector<uint32_t> &modes, const std::vector<uint32_t> &start)
     {
         struct Trial {
-            uint32_t mode, pairs;
             double rate;
+            uint32_t mode, pairs;
         };
         std::vector<Trial> trials;
         std::string list, problem;
@@ -464,7 +464,7 @@ private:
             } else {
                 check_config(T_, n, mode);
             }
-            trials.push_back(Trial{mode, n, rate});
+            trials.push_back(Trial{rate, mode, n});
             best = std::max(best, rate);
         }
         if (trials.empty()) throw std::runtime_error(problem);
@@ -655,11 +655,11 @@ private:
 
     Backend &be_;
     Shared &sh_;
-    int index_;
-    uint32_t T_ = 0, N_ = 0, smode_ = CIP_SCRATCH_LEAN, arith_ = CIP_ARITH_WIDE;
-    uint64_t batches_ = 0;                // batches every thread has run so far
     std::vector<uint64_t> base_;          // value of batches_ when each thread was last seeded
     std::unique_ptr<SeedStore> seeds_;
+    uint64_t batches_ = 0;                // batches every thread has run so far
+    uint32_t T_ = 0, N_ = 0, smode_ = CIP_SCRATCH_LEAN, arith_ = CIP_ARITH_WIDE;
+    int index_;
 };
 
 bool check_outdir(const std::string &dir, std::string &err)
@@ -821,9 +821,9 @@ int run_tune(std::vector<std::unique_ptr<Backend>> &backends, const Options &opt
 namespace {
 
 struct Candidate {
+    std::string address;
     Hit pos;
     uint8_t pk[32];
-    std::string address;
 };
 
 bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t smode, uint32_t arith, std::string &log)

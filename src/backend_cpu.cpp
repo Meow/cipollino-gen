@@ -147,10 +147,10 @@ private:
             cip_search_thread<CIP_SCRATCH_HALF>(tid, prm_ CIP_BUFS);
     }
 
+    std::vector<uint32_t> table_, state_, scratch_, hits_, filt_, bitmap_;
+    cip_params prm_;
     unsigned workers_;
     uint32_t smode_ = CIP_SCRATCH_LEAN;
-    cip_params prm_;
-    std::vector<uint32_t> table_, state_, scratch_, hits_, filt_, bitmap_;
 };
 
 }  // namespace

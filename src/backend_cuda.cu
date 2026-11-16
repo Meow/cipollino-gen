@@ -215,14 +215,14 @@ private:
         return (u32 *)p;
     }
 
-    int dev_;
-    int sm_count_ = 0;
     std::string name_;
     u32 *state_ = nullptr, *table_ = nullptr, *scratch_ = nullptr, *hitctr_ = nullptr, *hits_ = nullptr;
     u32 *filt_ = nullptr, *bitmap_ = nullptr;
     size_t filt_bytes_ = 0;
-    uint32_t smode_ = CIP_SCRATCH_LEAN;
     cip_params prm_ = cip_params();
+    uint32_t smode_ = CIP_SCRATCH_LEAN;
+    int dev_;
+    int sm_count_ = 0;
 };
 
 }  // namespace

@@ -8,19 +8,20 @@
 
 #include "backend.h"
 
+// Members in order of alignment, so that the only padding is at the end.
 struct Options {
     std::vector<std::string> prefixes;  // normalized
-    bool client = false;                // search for x25519 client authorization keys
     std::string service;                // client: the onion address the keys are for, or empty
-    uint64_t want = 1;                  // stop after this many keys; 0 = until interrupted
     std::string outdir = ".";
+    uint64_t want = 1;                  // stop after this many keys; 0 = until interrupted
+    double launch_seconds = 0;          // 0 = backend default
+    double bench_seconds = 0;           // > 0: measure throughput for this long, write nothing
     uint32_t threads = 0;               // kernel threads per device; 0 = backend default
     uint32_t pairs = 0;                 // pairs per batch; 0 = fit the backend's memory budget
     int scratch = -1;                   // CIP_SCRATCH_* to force a scratch mode; -1 = backend's choice.
                                         // The client search has one.
     int arith = -1;                     // CIP_ARITH_* to force a field arithmetic; -1 = backend's choice
-    double launch_seconds = 0;          // 0 = backend default
-    double bench_seconds = 0;           // > 0: measure throughput for this long, write nothing
+    bool client = false;                // search for x25519 client authorization keys
     bool filter_tables = false;         // bitmap pre-filter even for few prefixes (see filter.h)
     bool quiet = false;
 };

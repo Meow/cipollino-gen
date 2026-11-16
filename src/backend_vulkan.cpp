@@ -605,13 +605,11 @@ private:
     static constexpr uint32_t kBindings = 7;  // state, table, scratch, hitctr, hits, filt, bitmap
     static constexpr uint32_t kModules = 8;   // field arithmetics times loop variants
 
+    // Members in order of alignment: the handles and what holds 64-bit values first.
     std::shared_ptr<Instance> instance_;  // must outlive the device
     VkPhysicalDevice phys_;
-    int index_;
     VkPhysicalDeviceProperties props_;
-    VkPhysicalDeviceMemoryProperties mem_;
     VkDevice dev_ = VK_NULL_HANDLE;
-    uint32_t family_ = 0;
     VkQueue queue_ = VK_NULL_HANDLE;
     VkCommandPool pool_ = VK_NULL_HANDLE;
     VkCommandBuffer cmd_ = VK_NULL_HANDLE;
@@ -624,8 +622,11 @@ private:
     VkPipeline pipelines_[kModules] = {};
     VkPipeline active_ = VK_NULL_HANDLE;  // the one configure() chose
     Buffer state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_;
-    uint32_t arith_ = CIP_ARITH_WIDE;
+    VkPhysicalDeviceMemoryProperties mem_;
     cip_params prm_ = cip_params();
+    uint32_t family_ = 0;
+    uint32_t arith_ = CIP_ARITH_WIDE;
+    int index_;
 };
 
 }  // namespace
