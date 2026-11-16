@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace onion {
 
@@ -16,8 +17,22 @@ std::string address(const uint8_t pk[32]);
 // 0..31 for a base32 character (a-z, 2-7; upper case accepted), -1 otherwise.
 int base32_value(char c);
 
+// A prefix is a sequence of address characters and wildcards: ?d is a digit (2-7), ?l a
+// letter, ?a either.
+//
 // Lower-cases a prefix and strips an optional ".onion"; returns false (with a message in
-// `err`) if it contains characters that can never appear in an address or is too long.
+// `err`) if it contains characters that can never appear in an address, a malformed
+// wildcard, or is too long.
 bool normalize_prefix(std::string &prefix, std::string &err);
+
+// What a normalized prefix allows at each of its positions: bit v is set if the character
+// with base32 value v may stand there.
+std::vector<uint32_t> prefix_sets(const std::string &prefix);
+
+// The first `n` positions of a normalized prefix (all of it if it has fewer).
+std::string prefix_head(const std::string &prefix, size_t n);
+
+// Whether an address starts with a normalized prefix.
+bool prefix_matches(const std::string &prefix, const std::string &address);
 
 }  // namespace onion

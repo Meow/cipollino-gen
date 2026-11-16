@@ -30,6 +30,7 @@ static void usage(FILE *out)
         "\n"
         "Searches for Tor v3 onion addresses that start with any of the given prefixes and\n"
         "writes each one as a ready-to-use HiddenServiceDir: <dir>/<address>.onion/\n"
+        "In a prefix, ?d stands for a digit (2-7), ?l for a letter and ?a for either.\n"
         "\n"
         "  -n, --count N       stop after N keys (default 1; 0 = run until interrupted)\n"
         "  -d, --dir DIR       where to create the <address>.onion directories (default .)\n"

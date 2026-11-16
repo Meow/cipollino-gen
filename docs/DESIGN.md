@@ -107,6 +107,11 @@ host compares the full address.
 | 5 to 12 | the same with twelve slots, branch-free: about 70 instructions per pair, no memory access |
 | more | an 8 KiB bit table on the first 16 bits, which stays in the cache next to the cores; the one key in 65536 per prefix that passes is looked up in two 2 MiB tables covering all 32 bits |
 
+Every comparison is a mask and a value on key bits; nothing is encoded on the GPU. A
+wildcard contributes the bits that all of its characters share: the top two for `?d`,
+none for `?l` and `?a`. The kernel then reports a superset (a third more per `?d`, a
+quarter more per `?l`) and the host decides on the text.
+
 ## Launches and hits
 
 A launch runs a number of batches on every thread and returns hits as positions
@@ -162,6 +167,8 @@ wide one fewer.
 - Fastest at 1024 to 2048 threads, a third slower at 16384. Vulkan cannot ask a device
   how wide it is, so on integrated GPUs it measures the thread count at start-up.
 - ROCm is 5% faster with batches of 512 pairs than of 1024.
+- A function call makes this GPU spill its registers. hipcc compiles the whole kernel as
+  one function in seconds, so the ROCm build inlines everything: 2%.
 
 ### Apple M5 Pro
 

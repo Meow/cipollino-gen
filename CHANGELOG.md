@@ -8,7 +8,8 @@ may change between minor versions.
 First versioned release.
 
 - Backends: CUDA, ROCm, Metal, Vulkan and a CPU fallback, all running one kernel source.
-- Any number of prefixes per search; `-n` keys per run.
+- Any number of prefixes per search, with the wildcards `?d`, `?l` and `?a`; `-n` keys
+  per run.
 - One key per seed; every key re-derived and validated with libsodium before it is written.
 - `--bench`, `--tune`, `--selftest` and `--verify`.
 - Linux and macOS builds with make, Windows build with CMake, container images for

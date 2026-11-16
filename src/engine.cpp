@@ -501,7 +501,7 @@ private:
         // kept small enough that half the hit buffer is expected to do: fewer batches, and
         // below one batch a window of the threads at a time. Chance can still overflow the
         // buffer; such a launch is then run again in parts (Lossless).
-        const double per_batch_hits = (double)T_ * (double)per_thread * sh_.p_match;
+        const double per_batch_hits = (double)T_ * (double)per_thread * sh_.filter.density;
         const double budget = Backend::kHitCap / 2.0;
         const uint32_t window = per_batch_hits > budget ? (uint32_t)std::max(1.0, T_ * budget / per_batch_hits) : T_;
         const double nb_limit = window < T_ ? 1.0 : std::min(16384.0, std::max(1.0, budget / std::max(per_batch_hits, 1e-300)));
@@ -840,6 +840,15 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
     std::vector<std::string> dense;
     for (int i = 0; i < 16; i++) dense.push_back(std::string(1, "abcdefghijklmnopqrstuvwxyz234567"[2 * i + (int)(rng() & 1)]));
     lists.push_back(dense);
+    // Wildcards: a candidate's address with two characters replaced by their class and one
+    // by "any", next to a prefix of wildcards alone and one with a wildcard past 64 bits.
+    auto wild = [&](std::string s) {
+        std::string w;
+        for (size_t i = 0; i < s.size(); i++)
+            w += i == 1 || i == 4 ? (s[i] >= 'a' ? "?l" : "?d") : i == 2 ? "?a" : std::string(1, s[i]);
+        return w;
+    };
+    lists.push_back({wild(stolen(6)), "?d?d" + random_prefix(1), wild(stolen(4)) + "?l?l?l?l?l?l?l?l?l?l?d"});
 
     Lossless lossless{be, [&](uint32_t first, uint32_t count, uint32_t batch) {
                           restore_threads(be, seeds, first, count, N, [&](uint32_t) { return (uint64_t)batch; });
@@ -848,14 +857,16 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
         const std::vector<std::string> &prefixes = lists[li];
         Filter f = build_filter(prefixes);
         std::vector<Hit> want;
+        bool wildcards = false;
+        for (const std::string &p : prefixes) wildcards = wildcards || p.find('?') != std::string::npos;
         for (const Candidate &c : all) {
             bool text = false;
             for (const std::string &p : prefixes)
                 // The kernel contract is the first 64 bits; 12 characters fit inside them.
-                if (c.address.compare(0, std::min<size_t>(p.size(), 12), p, 0, std::min<size_t>(p.size(), 12)) == 0)
-                    text = true;
+                if (onion::prefix_matches(onion::prefix_head(p, 12), c.address)) text = true;
             bool kernel = f.matches(c.pk);
-            if (kernel && !text) {
+            // For a wildcard the kernel compares only the bits all its characters share.
+            if (kernel && !text && !wildcards) {
                 log += std::string(tag) + ": filter matches a key no prefix matches\n";
                 return false;
             }
@@ -863,7 +874,8 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
                 // Only legitimate for prefixes of 13+ characters: bits 60..63 also count.
                 bool longer = false;
                 for (const std::string &p : prefixes)
-                    if (p.size() > 12 && c.address.compare(0, 12, p, 0, 12) == 0) longer = true;
+                    if (onion::prefix_sets(p).size() > 12 && onion::prefix_matches(onion::prefix_head(p, 12), c.address))
+                        longer = true;
                 if (!longer) {
                     log += std::string(tag) + ": filter misses " + c.address + "\n";
                     return false;

@@ -98,26 +98,71 @@ int base32_value(char c)
     return -1;
 }
 
+// The characters a wildcard letter stands for, as a set of base32 values; 0 if it is none.
+static uint32_t wildcard_set(char c)
+{
+    switch (c) {
+    case 'd': return 0xfc000000u;  // 2-7 are the values 26..31
+    case 'l': return 0x03ffffffu;
+    case 'a': return 0xffffffffu;
+    }
+    return 0;
+}
+
 bool normalize_prefix(std::string &prefix, std::string &err)
 {
-    const std::string suffix = ".onion";
+    const std::string suffix = ".onion", given = prefix;
     if (prefix.size() >= suffix.size() && prefix.compare(prefix.size() - suffix.size(), suffix.size(), suffix) == 0)
         prefix.resize(prefix.size() - suffix.size());
     if (prefix.empty()) {
         err = "empty prefix";
         return false;
     }
-    if (prefix.size() > 56) {
-        err = "prefix '" + prefix + "' is longer than an onion address (56 characters)";
-        return false;
-    }
-    for (char &c : prefix) {
-        if (base32_value(c) < 0) {
-            err = "prefix '" + prefix + "' contains '" + std::string(1, c) +
-                  "': onion addresses only use a-z and 2-7";
+    size_t length = 0;
+    for (size_t i = 0; i < prefix.size(); i++, length++) {
+        char &c = prefix[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c == '?') {
+            char &w = prefix[++i < prefix.size() ? i : i - 1];
+            if (w >= 'A' && w <= 'Z') w = (char)(w - 'A' + 'a');
+            if (i >= prefix.size() || !wildcard_set(w)) {
+                err = "prefix '" + given + "': a wildcard is ?d (digit), ?l (letter) or ?a (either)";
+                return false;
+            }
+        } else if (base32_value(c) < 0) {
+            err = "prefix '" + given + "' contains '" + std::string(1, c) + "': onion addresses only use a-z and 2-7";
             return false;
         }
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    }
+    if (length > 56) {
+        err = "prefix '" + given + "' is longer than an onion address (56 characters)";
+        return false;
+    }
+    return true;
+}
+
+std::vector<uint32_t> prefix_sets(const std::string &prefix)
+{
+    std::vector<uint32_t> sets;
+    for (size_t i = 0; i < prefix.size(); i++)
+        sets.push_back(prefix[i] == '?' ? wildcard_set(prefix[++i]) : 1u << base32_value(prefix[i]));
+    return sets;
+}
+
+std::string prefix_head(const std::string &prefix, size_t n)
+{
+    size_t i = 0;
+    for (; i < prefix.size() && n > 0; n--) i += prefix[i] == '?' ? 2 : 1;
+    return prefix.substr(0, i);
+}
+
+bool prefix_matches(const std::string &prefix, const std::string &address)
+{
+    const std::vector<uint32_t> sets = prefix_sets(prefix);
+    if (address.size() < sets.size()) return false;
+    for (size_t i = 0; i < sets.size(); i++) {
+        int v = base32_value(address[i]);
+        if (v < 0 || !((sets[i] >> v) & 1)) return false;
     }
     return true;
 }

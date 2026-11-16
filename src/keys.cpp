@@ -119,7 +119,7 @@ bool finalize(Key &out, const uint8_t seed[32], Offset m, const std::vector<std:
     out.address = onion::address(out.pk);
     bool match = false;
     for (const std::string &p : prefixes)
-        if (out.address.compare(0, p.size(), p) == 0) match = true;
+        if (onion::prefix_matches(p, out.address)) match = true;
     if (!match) {
         why = "address " + out.address + " does not match any prefix";
         return false;

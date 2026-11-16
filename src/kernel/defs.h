@@ -16,9 +16,9 @@
 //     typedefs, no identifiers that GLSL reserves (step, half, filter, input, ...).
 //
 // Functions are CIP_FN (always inlined: everything executed per key pair) or CIP_COLD_FN
-// (code that runs once per batch or on rare paths). The distinction only matters to nvcc,
-// whose device compiler needs tens of minutes if the whole kernel is one inlined function;
-// the other compilers are free to inline cold functions too.
+// (code that runs once per batch or on rare paths). The distinction exists for nvcc, whose
+// device compiler needs tens of minutes if the whole kernel is one inlined function; hipcc
+// inlines the cold functions too, and the other compilers are free to.
 //
 // The including file selects the target by defining exactly one of
 // CIP_TARGET_METAL / CIP_TARGET_CUDA (also used for HIP) / CIP_TARGET_GLSL / CIP_TARGET_CPU.
@@ -42,9 +42,13 @@ typedef ulong u64;
 typedef uint32_t u32;
 typedef uint64_t u64;
 #define CIP_FN __device__ __forceinline__
-// Spelled out: CUDA's __noinline__ macro collides with libstdc++, which writes
+// hipcc compiles the kernel as one function in seconds, and a call costs an AMD GPU a
+// spill of its registers: inlining everything is worth 2% on a Radeon 610M.
+// Elsewhere, spelled out: CUDA's __noinline__ macro collides with libstdc++, which writes
 // __attribute__((__noinline__)).
-#if defined(_MSC_VER)
+#if defined(CIP_ROCM)
+#define CIP_COLD_FN static __device__ __forceinline__
+#elif defined(_MSC_VER)
 #define CIP_COLD_FN static __device__ __declspec(noinline)
 #else
 #define CIP_COLD_FN static __device__ __attribute__((noinline))

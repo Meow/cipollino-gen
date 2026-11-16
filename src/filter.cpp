@@ -16,12 +16,16 @@ static inline int le_position(int n) { return 8 * (n / 8) + 7 - n % 8; }
 static void prefix_mask(const std::string &p, uint64_t &mask, uint64_t &value)
 {
     mask = value = 0;
-    int nbits = std::min<int>(5 * (int)p.size(), 64);
-    for (int n = 0; n < nbits; n++) {
-        int v = onion::base32_value(p[n / 5]);
-        uint64_t bit = (v >> (4 - n % 5)) & 1;
+    const std::vector<uint32_t> sets = onion::prefix_sets(p);
+    for (int n = 0; n < 64 && n / 5 < (int)sets.size(); n++) {
+        // A bit of a position counts if every character allowed there has it the same.
+        uint32_t ones = 0;
+        for (int v = 0; v < 32; v++)
+            if ((v >> (4 - n % 5)) & 1) ones |= 1u << v;
+        const uint32_t set = sets[n / 5];
+        if ((set & ones) != 0 && (set & ~ones) != 0) continue;
         mask |= (uint64_t)1 << le_position(n);
-        value |= bit << le_position(n);
+        value |= (uint64_t)((set & ones) != 0) << le_position(n);
     }
 }
 
@@ -57,6 +61,9 @@ Filter build_filter(const std::vector<std::string> &prefixes, bool tables)
         f.records.push_back((uint32_t)value);
         f.records.push_back((uint32_t)(mask >> 32));
         f.records.push_back((uint32_t)(value >> 32));
+        int bits = 0;
+        for (uint64_t m = mask; m; m &= m - 1) bits++;
+        f.density = std::min(1.0, f.density + std::ldexp(1.0, -bits));
     }
     if (prefixes.size() <= CIP_MAX_DIRECT && !tables) {
         f.mode = prefixes.size() <= CIP_FEW_DIRECT ? CIP_MODE_DIRECT : CIP_MODE_DIRECT_MANY;
@@ -90,15 +97,41 @@ bool Filter::matches(const uint8_t pk[32]) const
 double match_probability(std::vector<std::string> prefixes)
 {
     std::sort(prefixes.begin(), prefixes.end());
+    prefixes.erase(std::unique(prefixes.begin(), prefixes.end()), prefixes.end());
+    bool wild = false;
+    for (const std::string &s : prefixes) wild = wild || s.find('?') != std::string::npos;
     double p = 0;
-    std::string last;
-    bool have = false;
-    for (const std::string &s : prefixes) {
-        // Sorted order puts every extension right after (a chain from) its shortest stem.
-        if (have && s.compare(0, last.size(), last) == 0) continue;
-        p += std::pow(32.0, -(double)s.size());
-        last = s;
-        have = true;
+    if (!wild) {
+        std::string last;
+        bool have = false;
+        for (const std::string &s : prefixes) {
+            // Sorted order puts every extension right after (a chain from) its shortest stem.
+            if (have && s.compare(0, last.size(), last) == 0) continue;
+            p += std::pow(32.0, -(double)s.size());
+            last = s;
+            have = true;
+        }
+        return p;
     }
-    return p;
+    // With wildcards one prefix covers another if it is no longer and allows, at each of
+    // its positions, everything the other does. Lists with wildcards are short.
+    std::vector<std::vector<uint32_t>> sets;
+    for (const std::string &s : prefixes) sets.push_back(onion::prefix_sets(s));
+    for (size_t i = 0; i < sets.size(); i++) {
+        bool covered = false;
+        for (size_t j = 0; j < sets.size() && !covered; j++) {
+            if (j == i || sets[j].size() > sets[i].size() || (sets[j] == sets[i] && j > i)) continue;
+            covered = true;
+            for (size_t k = 0; k < sets[j].size(); k++) covered = covered && (sets[i][k] & ~sets[j][k]) == 0;
+        }
+        if (covered) continue;
+        double q = 1;
+        for (uint32_t set : sets[i]) {
+            int n = 0;
+            for (uint32_t m = set; m; m &= m - 1) n++;
+            q *= n / 32.0;
+        }
+        p += q;
+    }
+    return std::min(p, 1.0);
 }

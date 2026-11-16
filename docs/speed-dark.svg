@@ -36,8 +36,8 @@
 <text x="28.0" y="287.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">AMD Radeon 610M</text>
 <text x="176.0" y="314.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">ROCm</text>
 <line x1="190.0" y1="310.0" x2="610.0" y2="310.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
-<circle cx="263.0" cy="310.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-<text x="275.0" y="314.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">105 M</text>
+<circle cx="264.1" cy="310.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="276.1" y="314.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">107 M</text>
 <text x="176.0" y="342.0" font-size="12" font-weight="400" text-anchor="end" fill="#c3c2b7">Vulkan</text>
 <line x1="190.0" y1="338.0" x2="610.0" y2="338.0" stroke="#2c2c2a" stroke-width="1" stroke-linecap="round"/>
 <circle cx="253.6" cy="338.0" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>

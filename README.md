@@ -2,9 +2,9 @@
 
 GPU vanity address generator for Tor v3 onion services.
 
-- Runs on **CUDA** (NVIDIA), **ROCm** (AMD), **Metal** (Apple) and **Vulkan** (any
-  vendor), on every GPU in the machine, with a CPU fallback.
-- Searches for any number of prefixes at once.
+- Built for GPUs: **CUDA** (NVIDIA), **ROCm** (AMD), **Metal** (Apple) and **Vulkan**
+  (any vendor), on every GPU in the machine.
+- Searches for any number of prefixes at once, with wildcards.
 - Seeds come from the OS CSPRNG, the GPU never sees a secret, and every key is derived
   again and validated on the CPU with libsodium before it is written.
 
@@ -23,6 +23,11 @@ cipollya765v….onion/hostname
 cipollya765v….onion/hs_ed25519_public_key
 cipollya765v….onion/hs_ed25519_secret_key      (mode 0600, directory 0700)
 ```
+
+**No GPU?** The CPU backend is a fallback that runs the GPU kernel on host threads, not
+a tuned CPU search. On a CPU, [Prefix32](https://github.com/0xROOTPLS/Prefix32) and
+[onion-vanity-address](https://github.com/AlexanderYastrebov/onion-vanity-address) are
+faster.
 
 ## Install
 
@@ -70,6 +75,10 @@ Prefixes use the onion alphabet (`a-z`, `2-7`); upper case and a trailing `.onio
 accepted. Addresses go to stdout, everything else to stderr. The exit status is 0 when
 the requested number of keys was found and 130 when interrupted first.
 
+**Wildcards.** In a prefix, `?d` stands for a digit (`2-7`), `?l` for a letter and `?a`
+for either: `cipollino -n 3 'onion?d?d' 'my?lsite'`. Quote them, as `?` means something
+to the shell.
+
 **Estimates.** The progress line ends in `1 key per 6.5 h (50% within 4.5 h, 95% within
 19.5 h)`: the average wait at the current rate, and the waits that half and 95% of all
 searches stay under. The search has no memory, so the estimate always counts from now.
@@ -96,7 +105,7 @@ nothing public depends on it.
 | Apple M5 Pro, first 20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, heat-soaked | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU | 150 M |
-| AMD Radeon 610M (2 compute units) | ROCm 6.4 | 105 M |
+| AMD Radeon 610M (2 compute units) | ROCm 6.4 | 107 M |
 | AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M |
 
 Measured with `--bench`, the 4090 and the Radeon in the container images. Not tested:

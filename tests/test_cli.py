@@ -8,6 +8,7 @@ import base64
 import hashlib
 import os
 import random
+import re
 import shutil
 import stat
 import subprocess
@@ -92,6 +93,12 @@ def onion_address(pk):
     return base64.b32encode(pk + checksum + b"\x03").decode().lower()
 
 
+def matches(addr, prefix):
+    """Whether an address starts with a prefix, which may hold the wildcards ?d, ?l and ?a."""
+    pattern = prefix.lower().replace("?d", "[2-7]").replace("?l", "[a-z]").replace("?a", "[a-z2-7]")
+    return re.match(pattern, addr) is not None
+
+
 def check_key_dir(path, prefixes):
     name = os.path.basename(path)
     assert name.endswith(".onion") and len(name) == 62, name
@@ -108,7 +115,7 @@ def check_key_dir(path, prefixes):
     pk, sk = pub[32:], sec[32:]
 
     assert onion_address(pk) == addr, "address does not belong to the public key"
-    assert any(addr.startswith(p) for p in prefixes), f"{addr} matches none of {prefixes}"
+    assert any(matches(addr, p) for p in prefixes), f"{addr} matches none of {prefixes}"
     a = int.from_bytes(sk[:32], "little")
     assert a % 8 == 0 and 2**254 <= a < 2**255, "scalar is not clamped"
     assert compress(mul(a, G)) == pk, "public key does not belong to the secret scalar"
@@ -160,6 +167,15 @@ def main():
         assert len(dirs) == 4
         for d in dirs:
             check_key_dir(os.path.join(out, d), many)
+
+        # wildcards: a digit, a letter, either; the kernel reports a superset, the host decides
+        out = os.path.join(tmp, "wild")
+        wild = ["q?d?d", "?L?d?dz", "xy?a?l7"]
+        r = run(binary, backend, ["-n", "12", "-d", out] + wild)
+        dirs = sorted(os.listdir(out))
+        assert len(dirs) == 12
+        for d in dirs:
+            check_key_dir(os.path.join(out, d), wild)
 
         # a longer single prefix
         out = os.path.join(tmp, "one")
@@ -230,7 +246,7 @@ def main():
         run(binary, backend, ["--verify", intact])
 
         # bad input is rejected before any work happens
-        for bad in (["abc1"], ["has space"], ["a" * 57], []):
+        for bad in (["abc1"], ["has space"], ["a" * 57], ["ab?"], ["a?x"], ["?d" * 57], []):
             run(binary, backend, ["-d", os.path.join(tmp, "bad")] + bad, expect=2)
         assert not os.path.exists(os.path.join(tmp, "bad"))
 
