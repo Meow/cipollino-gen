@@ -146,21 +146,21 @@ Files are named after the public key and created with mode 0600. `--verify` and
 | Apple M5 Pro, 18 cores | CPU | 150 M |
 | AMD Radeon RX 6800 XT | ROCm 10.0 | 3.82 G |
 | AMD Radeon RX 6700 XT | Vulkan (Mesa) | 1.95 G |
-| AMD Radeon 610M (2 compute units) | ROCm 6.4 | 107 M |
-| AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M |
+| AMD Radeon 610M (2 compute units) | ROCm 6.4 | 108 M |
+| AMD Radeon 610M | Vulkan (Mesa 25.2) | 93 M |
 
 Measured with `--bench`: the 4090 and the Radeon 610M in the container images, the 2060
 SUPER, the 1650 SUPER and the RX 6800 XT with the Windows programs, the RX 6700 XT under
 Linux. Not tested: Intel GPUs, and the Vulkan backend under Windows.
 
-The client key search needs fewer multiplications per key and runs about 1.35 times as
+The client key search needs fewer multiplications per key and runs 1.35 to 1.4 times as
 fast:
 
 | device | backend | addresses | client keys |
 |---|---|---|---|
 | Apple M5 Pro, first seconds | Metal | 1.7 G | 2.4 G |
-| AMD Radeon 610M | ROCm 6.4 | 107 M | 147 M |
-| AMD Radeon 610M | Vulkan (Mesa 25.2) | 90 M | 122 M |
+| AMD Radeon 610M | ROCm 6.4 | 108 M | 151 M |
+| AMD Radeon 610M | Vulkan (Mesa 25.2) | 93 M | 126 M |
 
 Every extra character multiplies the work by 32:
 
@@ -205,7 +205,7 @@ measures at start-up. `--tune` measures more and prints the fastest setting as f
 |---|---|
 | `--scratch` | Device memory traffic for arithmetic: `full` stores two field elements per key pair, `lean` one (one more squaring), `half` one per two pairs (half a multiplication more). Measured at start-up. |
 | `--threads` | More threads cost memory; too few leave the GPU idle. CUDA uses 2048 per multiprocessor, ROCm 1024 per multiprocessor (two compute units), Metal 65536. Vulkan measures: 1024 to 16384 on integrated GPUs, 16384 to 131072 on discrete AMD ones; other discrete GPUs get 131072. |
-| `--pairs` | Larger batches spread the one inversion per batch thinner (3% of the work at 512 pairs, 1.5% at 1024) and take `threads * pairs * 32` bytes in `lean` mode. |
+| `--pairs` | Larger batches spread the one inversion per batch thinner (1% of the work at 512 pairs, 0.6% at 1024) and take `threads * pairs * 32` bytes in `lean` mode. |
 | `--arith` | The field multiplication: `wide` on 32x32 multiplies, `narrow` on 24-bit ones. Only Vulkan has both; it measures them on every GPU that is not NVIDIA's or Apple's, which get `wide`. |
 | `--filter` | `bitmap` sends a short prefix list through the bit tables that long lists use. For comparing the two with `--bench`. |
 | `--launch-ms` | Longer launches cost less overhead and respond later. Windows resets a GPU that does not answer for two seconds. |

@@ -7,8 +7,9 @@
 // Rules for that subset:
 //   - field elements are passed and returned by value; no references, no pointers to
 //     thread-local data (MSL wants an address space on every pointer, GLSL has none);
-//   - conversions are written CIP_U32(x) / CIP_U64(x), never as C casts (GLSL only has
-//     constructor syntax);
+//   - conversions are written CIP_U32(x) / CIP_U64(x) / CIP_I32(x) / CIP_I64(x), never
+//     as C casts (GLSL only has constructor syntax), and signed and unsigned values do
+//     not mix in one operation (GLSL has no such conversions);
 //   - device buffers are reached only through the names state, table, scratch, hits,
 //     filt, bitmap and CIP_HIT_NEXT(). On the C-like targets those are pointers handed
 //     down the call chain by CIP_BUFS_DECL / CIP_BUFS; in GLSL they are globals;
@@ -29,6 +30,8 @@
 using namespace metal;
 typedef uint u32;
 typedef ulong u64;
+typedef int i32;
+typedef long i64;
 #define CIP_FN static inline __attribute__((always_inline))
 #define CIP_COLD_FN static inline
 #define CIP_GPTR(T) device T *
@@ -41,6 +44,8 @@ typedef ulong u64;
 #include <stdint.h>
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef int32_t i32;
+typedef int64_t i64;
 #define CIP_FN __device__ __forceinline__
 // hipcc compiles the kernel as one function in seconds, and a call costs an AMD GPU a
 // spill of its registers: inlining everything is worth 2% on a Radeon 610M.
@@ -78,6 +83,8 @@ static __device__ __forceinline__ u64 cip_mul_wide(u32 a, u32 b)
 #include <stdint.h>
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef int32_t i32;
+typedef int64_t i64;
 #define CIP_FN static inline
 #define CIP_COLD_FN static inline
 #define CIP_GPTR(T) T *
@@ -95,10 +102,14 @@ typedef uint64_t u64;
 // The including shader declares the buffers as globals and CIP_SMODE as a macro.
 #define u32 uint
 #define u64 uint64_t
+#define i32 int
+#define i64 int64_t
 #define CIP_FN
 #define CIP_COLD_FN
 #define CIP_U32(x) uint(x)
 #define CIP_U64(x) uint64_t(x)
+#define CIP_I32(x) int(x)
+#define CIP_I64(x) int64_t(x)
 #define CIP_BUFS_DECL
 #define CIP_BUFS
 #define CIP_HIT_NEXT() atomicAdd(hitctr, 1u)
@@ -112,6 +123,8 @@ typedef uint64_t u64;
 #ifndef CIP_BUFS_DECL
 #define CIP_U32(x) ((u32)(x))
 #define CIP_U64(x) ((u64)(x))
+#define CIP_I32(x) ((i32)(x))
+#define CIP_I64(x) ((i64)(x))
 // Not every function touches every buffer.
 #if defined(CIP_TARGET_METAL)
 #define CIP_UNUSED

@@ -8,6 +8,7 @@ may change between minor versions.
 - Client authorization keys: `--client` searches for x25519 key pairs with a prefix on
   the public key, `--service` writes them ready for `ClientOnionAuthDir`.
 - Vulkan measures its thread count on discrete AMD GPUs: 5% on an RX 6700 XT.
+- The inversion of a batch is a GCD (division steps), a third of the cost: 1 to 3% faster.
 
 ## 0.2.0
 

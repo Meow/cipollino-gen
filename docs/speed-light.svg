@@ -52,10 +52,10 @@
 <text x="452.6" y="398.0" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">1.95 G</text>
 <text x="176.0" y="426.0" font-size="12" font-weight="400" text-anchor="end" fill="#52514e">Radeon 610M, ROCm</text>
 <line x1="190.0" y1="422.0" x2="610.0" y2="422.0" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
-<circle cx="264.1" cy="422.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
-<text x="276.1" y="426.0" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">107 M</text>
+<circle cx="264.7" cy="422.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="276.7" y="426.0" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">108 M</text>
 <text x="176.0" y="454.0" font-size="12" font-weight="400" text-anchor="end" fill="#52514e">Radeon 610M, Vulkan</text>
 <line x1="190.0" y1="450.0" x2="610.0" y2="450.0" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
-<circle cx="253.6" cy="450.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
-<text x="265.6" y="454.0" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">90 M</text>
+<circle cx="255.6" cy="450.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="267.6" y="454.0" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">93 M</text>
 </svg>

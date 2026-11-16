@@ -38,7 +38,14 @@ y(C - Q_i) = (A - B) / (1 + t)        t = d*x1*y1*x_i*y_i = (x1*y1) * k_i
 
 A pair costs 8 multiplications, one squaring and two probes in the `lean` scratch mode:
 about 4.6 multiplications per key (on an M5 Pro a squaring costs 0.57 of a
-multiplication and a probe 0.35), plus 1 to 3% for the batch inversion.
+multiplication and a probe 0.35), plus the batch inversion.
+
+**The inversion** is Bernstein and Yang's division steps in the arrangement of
+libsecp256k1: 20 rounds of 30 steps on the low limbs, each applied to the full values as
+one 2x2 matrix, on nine signed limbs of 30 bits. Nothing inverted is secret, so its
+timing does not matter. On an M5 Pro it takes as long as 57 multiplications, a third of
+the addition chain for `z^(p-2)` (254 squarings and 11 multiplications): 1% of a batch of
+512 pairs, 0.6% of one of 1024.
 
 ## The client key search
 
@@ -59,7 +66,7 @@ in full and its low 32 bits are tested.
 
 It is a fourth variant of the kernel loop next to the three scratch modes, compiled on
 its own, so it changes nothing about the address search. Measured against that search
-it is 1.38 times as fast on an M5 Pro (Metal) and 1.35 to 1.37 times on a Radeon 610M
+it is 1.36 times as fast on an M5 Pro (Metal) and 1.35 to 1.40 times on a Radeon 610M
 (Vulkan, ROCm).
 
 ## Scratch modes
@@ -199,8 +206,8 @@ wide one fewer.
   `full` scratch beats `lean` by 8 to 10% at batches of 1024 pairs and more.
 - ROCm is 5% faster with batches of 512 pairs than of 1024.
 - The rate scales with the size of the GPU. The HIP runtime counts one multiprocessor
-  here and 36 in an RX 6800 XT, which does 3.82 G keys/s: 106 M on each, as here. An
-  RX 6700 XT, 20 of them, does 1.95 G keys/s with Vulkan: 98 M on each, against 90 M here.
+  here and 36 in an RX 6800 XT, which does 3.82 G keys/s: 106 M on each, close to the 108 M here. An
+  RX 6700 XT, 20 of them, does 1.95 G keys/s with Vulkan: 98 M on each, against 93 M here.
 - A function call makes this GPU spill its registers. hipcc compiles the whole kernel as
   one function in seconds, so the ROCm build inlines everything: 2%.
 

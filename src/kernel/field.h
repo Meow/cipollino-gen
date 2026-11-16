@@ -302,6 +302,137 @@ CIP_FN fe fe_unpack(fe8 a)
     return r;
 }
 
+// 1/z for tight z, by Bernstein and Yang's division steps as libsecp256k1 arranges them:
+// f = p and g = z shrink towards 1 and 0 while d and e follow as z's cofactors modulo p.
+// A round runs 30 steps on the low limbs alone and applies their sum to the four values
+// as one 2x2 matrix. 20 rounds reach g = 0 from any 256-bit value. Values are nine signed
+// limbs of 30 bits. Variable time is no concern: everything inverted here is public.
+CIP_COLD_FN fe fe_invert_gcd(fe z)
+{
+    const u32 m30 = 0x3fffffffu;
+    const i32 s30 = 0x3fffffff;
+    fe8 w = fe_pack(z);
+    u32 gw[9];
+    gw[0] = w.w[0] & m30;
+    gw[1] = ((w.w[0] >> 30) | (w.w[1] << 2)) & m30;
+    gw[2] = ((w.w[1] >> 28) | (w.w[2] << 4)) & m30;
+    gw[3] = ((w.w[2] >> 26) | (w.w[3] << 6)) & m30;
+    gw[4] = ((w.w[3] >> 24) | (w.w[4] << 8)) & m30;
+    gw[5] = ((w.w[4] >> 22) | (w.w[5] << 10)) & m30;
+    gw[6] = ((w.w[5] >> 20) | (w.w[6] << 12)) & m30;
+    gw[7] = ((w.w[6] >> 18) | (w.w[7] << 14)) & m30;
+    gw[8] = w.w[7] >> 16;
+    // A tight value is below 2^255 + 2^243: take p off one that has bit 255.
+    gw[0] += 19u * (gw[8] >> 15);
+    gw[8] &= 0x7fffu;
+    for (u32 k = 0u; k < 8u; k++) {
+        gw[k + 1u] += gw[k] >> 30;
+        gw[k] &= m30;
+    }
+
+    i32 pl[9], f[9], g[9], d[9], e[9];
+    for (u32 k = 0u; k < 9u; k++) {
+        pl[k] = s30;
+        g[k] = CIP_I32(gw[k]);
+        d[k] = 0;
+        e[k] = 0;
+    }
+    pl[0] = 0x3fffffed;
+    pl[8] = 0x7fff;
+    for (u32 k = 0u; k < 9u; k++) f[k] = pl[k];
+    e[0] = 1;
+    i32 zeta = -1;  // -(delta + 1/2) of the paper, delta starting at 1/2
+
+    for (u32 round = 0u; round < 20u; round++) {
+        // 30 division steps on the low limbs: f, g -> (u f + v g, q f + r g) / 2^30.
+        u32 u = 1u, v = 0u, q = 0u, r = 1u;
+        u32 fl = CIP_U32(f[0]), gl = CIP_U32(g[0]);
+        for (u32 s = 0u; s < 30u; s++) {
+            u32 neg = CIP_U32(zeta >> 31);  // all ones if zeta < 0
+            u32 odd = 0u - (gl & 1u);
+            gl += ((fl ^ neg) - neg) & odd;
+            q += ((u ^ neg) - neg) & odd;
+            r += ((v ^ neg) - neg) & odd;
+            neg &= odd;
+            zeta = (zeta ^ CIP_I32(neg)) - 1;
+            fl += gl & neg;
+            u += q & neg;
+            v += r & neg;
+            gl >>= 1;
+            u <<= 1;
+            v <<= 1;
+        }
+        const i64 tu = CIP_I64(CIP_I32(u)), tv = CIP_I64(CIP_I32(v)), tq = CIP_I64(CIP_I32(q)), tr = CIP_I64(CIP_I32(r));
+
+        // d, e -> (u d + v e, q d + r e) / 2^30 modulo p: a multiple of p = 2^255 - 19
+        // makes the low 30 bits zero. Both stay in (-2p, p).
+        i32 sd = d[8] >> 31, se = e[8] >> 31;
+        i32 md = (CIP_I32(u) & sd) + (CIP_I32(v) & se);
+        i32 me = (CIP_I32(q) & sd) + (CIP_I32(r) & se);
+        i64 cd = tu * CIP_I64(d[0]) + tv * CIP_I64(e[0]);
+        i64 ce = tq * CIP_I64(d[0]) + tr * CIP_I64(e[0]);
+        md -= CIP_I32((0x179435e5u * CIP_U32(cd) + CIP_U32(md)) & m30);  // 0x179435e5 = 1/p mod 2^30
+        me -= CIP_I32((0x179435e5u * CIP_U32(ce) + CIP_U32(me)) & m30);
+        cd = (cd - 19 * CIP_I64(md)) >> 30;
+        ce = (ce - 19 * CIP_I64(me)) >> 30;
+        for (u32 k = 1u; k < 9u; k++) {
+            cd += tu * CIP_I64(d[k]) + tv * CIP_I64(e[k]);
+            ce += tq * CIP_I64(d[k]) + tr * CIP_I64(e[k]);
+            if (k == 8u) {  // 2^255 is bit 15 of limb 8
+                cd += CIP_I64(md) << 15;
+                ce += CIP_I64(me) << 15;
+            }
+            d[k - 1u] = CIP_I32(cd) & s30;
+            e[k - 1u] = CIP_I32(ce) & s30;
+            cd >>= 30;
+            ce >>= 30;
+        }
+        d[8] = CIP_I32(cd);
+        e[8] = CIP_I32(ce);
+
+        i64 cf = (tu * CIP_I64(f[0]) + tv * CIP_I64(g[0])) >> 30;
+        i64 cg = (tq * CIP_I64(f[0]) + tr * CIP_I64(g[0])) >> 30;
+        for (u32 k = 1u; k < 9u; k++) {
+            i64 fk = CIP_I64(f[k]), gk = CIP_I64(g[k]);
+            cf += tu * fk + tv * gk;
+            cg += tq * fk + tr * gk;
+            f[k - 1u] = CIP_I32(cf) & s30;
+            g[k - 1u] = CIP_I32(cg) & s30;
+            cf >>= 30;
+            cg >>= 30;
+        }
+        f[8] = CIP_I32(cf);
+        g[8] = CIP_I32(cg);
+    }
+
+    // f is 1 or -1 and d the inverse times f, in (-2p, p): to [0, p).
+    i32 flip = f[8] >> 31;
+    i32 low = d[8] >> 31;
+    for (u32 k = 0u; k < 9u; k++) d[k] = ((d[k] + (pl[k] & low)) ^ flip) - flip;
+    for (u32 k = 0u; k < 8u; k++) {
+        d[k + 1u] += d[k] >> 30;
+        d[k] &= s30;
+    }
+    low = d[8] >> 31;
+    for (u32 k = 0u; k < 9u; k++) d[k] += pl[k] & low;
+    for (u32 k = 0u; k < 8u; k++) {
+        d[k + 1u] += d[k] >> 30;
+        d[k] &= s30;
+    }
+
+    u32 dw[9];
+    for (u32 k = 0u; k < 9u; k++) dw[k] = CIP_U32(d[k]);
+    w.w[0] = dw[0] | (dw[1] << 30);
+    w.w[1] = (dw[1] >> 2) | (dw[2] << 28);
+    w.w[2] = (dw[2] >> 4) | (dw[3] << 26);
+    w.w[3] = (dw[3] >> 6) | (dw[4] << 24);
+    w.w[4] = (dw[4] >> 8) | (dw[5] << 22);
+    w.w[5] = (dw[5] >> 10) | (dw[6] << 20);
+    w.w[6] = (dw[6] >> 12) | (dw[7] << 18);
+    w.w[7] = (dw[7] >> 14) | (dw[8] << 16);
+    return fe_unpack(w);
+}
+
 // Low 64 bits of the canonical (fully reduced) value of a tight element, as two u32s.
 // A tight value is < 2^255 + 2^243, so at most one subtraction of p is needed, and
 // subtracting p adds 19 to the low bits. (Values in [p, 2^255) are not corrected; for the

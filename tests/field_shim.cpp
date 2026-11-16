@@ -33,6 +33,7 @@ T_API void t_sub(u32 *r, const u32 *a, const u32 *b) { out(r, fe_sub(in(a), in(b
 T_API void t_one_minus(u32 *r, const u32 *a) { out(r, fe_one_minus(in(a))); }
 T_API void t_one_plus(u32 *r, const u32 *a) { out(r, fe_one_plus(in(a))); }
 T_API void t_invert(u32 *r, const u32 *a) { out(r, fe_invert(in(a))); }
+T_API void t_invert_gcd(u32 *r, const u32 *a) { out(r, fe_invert_gcd(in(a))); }
 T_API void t_pack(u32 *r8, const u32 *a)
 {
     fe8 p = fe_pack(in(a));

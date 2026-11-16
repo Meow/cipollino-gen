@@ -253,7 +253,7 @@ CIP_FN void cip_search_x25519(u32 tid, cip_params prm CIP_BUFS_DECL)
             p = fe_mul_tl(p, fe_sub(cip_table_load(20u * i CIP_BUFS), u1));
         }
 
-        fe inv_all = fe_invert(p);
+        fe inv_all = fe_invert_gcd(p);
 
         // Backward pass: peel one inverse per pair and finish both of its candidates.
         CIP_AHEAD(ahead, N - 1u);
@@ -321,7 +321,7 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
             p = fe_mul_t(p, fe_one_minus(e));
         }
 
-        fe inv_all = fe_invert(p);
+        fe inv_all = fe_invert_gcd(p);
 
         // Backward pass: peel one inverse per pair and finish both of its candidates.
         // (Fetching the table entry ahead as well is slower on an RTX 4090.)

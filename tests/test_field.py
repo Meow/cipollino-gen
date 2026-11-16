@@ -137,6 +137,15 @@ def main():
         a = canonical_limbs(rng.randrange(1, P))
         r = call(lib.t_invert, a)
         assert val(r) * val(a) % P == 1
+    # The GCD inversion takes any tight value, also one above p, and returns a canonical one.
+    edge = [1, 2, 19, P - 1, P - 2, P + 1, P + 20, 2**255 - 1, 2**255, 2**255 + 2**242, 2**254, 2**30 - 19, (P - 1) // 2]
+    for it in range(20000):
+        v = edge[it] if it < len(edge) else rng.randrange(1, P) if it % 4 else rng.randrange(1, 2**rng.randrange(1, 255))
+        a = canonical_limbs(v % 2**255)
+        a[9] |= (v >> 255) << 25
+        r = call(lib.t_invert_gcd, a)
+        assert_tight(r, "invert_gcd")
+        assert val(r) == pow(v, P - 2, P), hex(v)
     # Uniformly random operands: the probe may only be wrong where it says it is unsure,
     # and that has to stay rare (expected: 1 in 4096, with the narrow arithmetic 1 in
     # 130000) or the kernel's fallback gets hot.
