@@ -83,10 +83,12 @@ set(cip_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(cip_kernel src/kernel/defs.h src/kernel/field.h src/kernel/field13.h src/kernel/search.h)
 
 set(cip_backend_includes "")
-set(cip_backend_link_options "")
 
 # ROCm: backend_cuda.cu compiled as HIP by ROCm's clang++, which is then the compiler of
 # everything else too. One program has CUDA or ROCm, as the two are the same source file.
+# On Windows the program needs the HIP runtime's DLLs (amdhip64, rocm_kpack, amd_comgr,
+# in ROCm's bin directory) next to it or on PATH: the kernel registers itself with the
+# runtime before main() runs.
 if(CIP_ROCM)
   file(TO_CMAKE_PATH "${CIP_ROCM_PATH}" CIP_ROCM_PATH)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR NOT EXISTS "${CIP_ROCM_PATH}/include/hip/hip_runtime.h")
@@ -106,16 +108,6 @@ if(CIP_ROCM)
   list(APPEND cip_backend_includes "${CIP_ROCM_PATH}/include")
   list(APPEND cip_backend_libraries "${CIP_HIP_LIBRARY}")
   list(APPEND cip_gpu_backends rocm)
-  if(WIN32)
-    # The HIP runtime comes with the AMD driver. Loaded on first use, so that the
-    # program also starts on a machine without one (backend_cuda.cu checks for it).
-    file(GLOB cip_hip_dll "${CIP_ROCM_PATH}/bin/amdhip64*.dll")
-    list(GET cip_hip_dll 0 cip_hip_dll)
-    get_filename_component(cip_hip_dll "${cip_hip_dll}" NAME)
-    list(APPEND cip_backend_definitions "CIP_HIP_DLL=\"${cip_hip_dll}\"")
-    list(APPEND cip_backend_link_options "LINKER:/delayload:${cip_hip_dll}")
-    list(APPEND cip_backend_libraries delayimp)
-  endif()
 endif()
 
 if(CIP_CUDA STREQUAL "AUTO" OR CIP_CUDA)
@@ -201,7 +193,6 @@ add_executable(cipollino src/main.cpp ${cip_backend_sources})
 target_compile_definitions(cipollino PRIVATE ${cip_backend_definitions})
 target_include_directories(cipollino PRIVATE "${cip_generated}" ${cip_backend_includes})
 target_link_libraries(cipollino PRIVATE cipcore ${cip_backend_libraries})
-target_link_options(cipollino PRIVATE ${cip_backend_link_options})
 # No CUDA runtime DLL to ship: only the driver's own library is needed, and only when a
 # CUDA device is actually used.
 set_target_properties(cipollino PROPERTIES CUDA_RUNTIME_LIBRARY Static)

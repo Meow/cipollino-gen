@@ -31,13 +31,12 @@ faster.
 
 ## Install
 
-Programs from [Releases](https://github.com/Meow/cipollino-gen/releases), each one file
-plus this README:
+Programs from [Releases](https://github.com/Meow/cipollino-gen/releases):
 
 | download | backends | needs |
 |---|---|---|
 | `…-windows-x64-cuda.zip` | CUDA, Vulkan, CPU | an NVIDIA driver for CUDA; any GPU driver for Vulkan |
-| `…-windows-x64-rocm.zip` | ROCm, Vulkan, CPU | a current AMD driver, which brings the HIP runtime |
+| `…-windows-x64-rocm.zip` | ROCm, Vulkan, CPU | an AMD driver; carries AMD's HIP runtime |
 | `…-linux-x64-cuda.tar.gz` | CUDA, Vulkan, CPU | glibc 2.35 or later, an NVIDIA driver |
 | `…-linux-x64-rocm.tar.gz` | ROCm, Vulkan, CPU | glibc 2.35 or later, ROCm 6 in `/opt/rocm` |
 | `…-macos-arm64.tar.gz` | Metal, CPU | macOS 15 or later, Apple silicon |
@@ -284,6 +283,9 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
   -DCMAKE_CXX_COMPILER=%HIP_PATH%\lib\llvm\bin\clang++.exe -DCIP_ROCM=ON
 ```
+
+At run time it needs ROCm's `amdhip64`, `rocm_kpack` and `amd_comgr` DLLs (in the
+installation's `bin`) next to it or on `PATH`; the released zip carries them.
 
 ### Docker
 

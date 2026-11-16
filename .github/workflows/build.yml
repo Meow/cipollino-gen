@@ -148,29 +148,43 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -LE gpu
 
-      # With the HIP runtime on PATH (as on a machine with an AMD driver, but no AMD GPU
-      # here), and without it (as on any other machine).
-      - name: Check that it runs without an AMD GPU and without the HIP runtime
-        shell: pwsh
-        run: |
-          dumpbin /dependents build\cipollino.exe
-          $failed = 0
-          foreach ($arguments in @('--bench 2', '--backend rocm --bench 2', '--backend cpu --bench 2')) {
-            & build\cipollino.exe ($arguments -split ' ')
-            "cipollino $arguments -> exit status $LASTEXITCODE"
-            if ($LASTEXITCODE -ne 0 -and $arguments -notlike '*rocm*') { $failed = 1 }
-          }
-          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*rocm*' }) -join ';'
-          build\cipollino.exe --bench 2
-          "without the HIP runtime -> exit status $LASTEXITCODE"
-          if ($LASTEXITCODE -ne 0) { $failed = 1 }
-          exit $failed
-
+      # The kernel registers itself with the HIP runtime before main() runs, so the
+      # runtime's DLLs travel with the program: the one it was built against, whatever the
+      # AMD driver of the machine has in System32.
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory dist | Out-Null
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory dist, dist\licenses | Out-Null
           Copy-Item build\cipollino.exe, README.md, CHANGELOG.md, LICENSE dist\
+          $bin = (C:\rocm\Scripts\rocm-sdk path --bin).Trim()
+          foreach ($dll in @("amdhip64_*.dll", "rocm_kpack*.dll", "amd_comgr*.dll")) {
+            $found = Get-ChildItem "$bin\$dll"
+            if (-not $found) { throw "no $dll in $bin" }
+            Copy-Item $found.FullName dist\
+            dumpbin /dependents $found.FullName | Select-String '\.dll'
+          }
+          foreach ($part in @("hip", "amd_comgr", "rocm-kpack", "rocm_kpack")) {
+            Get-ChildItem "$env:HIP_PATH\share\doc\$part\LICENSE*" -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName "dist\licenses\$part-$($_.Name)" }
+          }
+          Get-ChildItem dist -Recurse | Format-Table Name, Length
+
+      # Away from ROCm's own directories, as on a machine that has neither ROCm nor an
+      # AMD GPU: the program has to start and fall back to the CPU.
+      - name: Check that the package runs on its own
+        shell: pwsh
+        run: |
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*rocm*' }) -join ';'
+          $env:HIP_PATH = ''
+          dumpbin /dependents dist\cipollino.exe
+          $failed = 0
+          foreach ($arguments in @('--version', '--bench 2', '--backend cpu --bench 2')) {
+            & dist\cipollino.exe ($arguments -split ' ')
+            "cipollino $arguments -> exit status $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          }
+          exit $failed
 
       - uses: actions/upload-artifact@v7
         with:
