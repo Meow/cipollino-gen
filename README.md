@@ -40,7 +40,7 @@ plus this README:
 | `…-windows-x64-rocm.zip` | ROCm, Vulkan, CPU | a current AMD driver, which brings the HIP runtime |
 | `…-linux-x64-cuda.tar.gz` | CUDA, Vulkan, CPU | glibc 2.35 or later, an NVIDIA driver |
 | `…-linux-x64-rocm.tar.gz` | ROCm, Vulkan, CPU | glibc 2.35 or later, ROCm 6 in `/opt/rocm` |
-| `…-macos-arm64.tar.gz` | Metal, CPU | macOS 14 or later, Apple silicon |
+| `…-macos-arm64.tar.gz` | Metal, CPU | macOS 15 or later, Apple silicon |
 
 Every one of them starts without its GPU and then uses what it finds, down to the CPU.
 The macOS program is not signed: after unpacking, `xattr -d com.apple.quarantine
