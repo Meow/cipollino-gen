@@ -113,9 +113,10 @@ two-instruction carry.
 An RX 6700 XT behind Mesa agrees: 2.00 G keys/s narrow, 1.24 G wide.
 
 Elsewhere narrow loses: an M5 Pro runs it at 0.42 of wide's speed, and on an RTX 4090 its
-400 multiplies should cost twice the energy of 100 wide ones (not measured). So the
-Vulkan backend carries both kernels, offers narrow first on AMD, measures both on GPUs
-that are neither NVIDIA's nor Apple's, and uses wide on those two. ROCm is built wide.
+400 multiplies should cost twice the energy of 100 wide ones (not measured). On an Intel
+UHD 730 under Windows the narrow kernel ends the process inside the driver, where no
+self-test can catch it. So the Vulkan backend carries both kernels, measures them on AMD
+with narrow first, and uses wide everywhere else. ROCm is built wide.
 
 **LLVM miscompiles narrow.** LLVM's AMD backend takes a sum of products of values masked
 to 13 bits for a dot product of bytes and emits `v_dot4_u32_u8` (`handleMulOperand` in

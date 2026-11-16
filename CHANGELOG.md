@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org). Before 1.0, options and output
 may change between minor versions.
 
+## Unreleased
+
+- Vulkan tries the narrow arithmetic on AMD GPUs only: on an Intel UHD 730 under Windows
+  it ended the program without a message.
+
 ## 0.3.0
 
 - Client authorization keys: `--client` searches for x25519 key pairs with a prefix on

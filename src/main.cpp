@@ -50,7 +50,7 @@ static void usage(FILE *out) {
     "                      a little arithmetic\n"
     "      --arith MODE    auto (default), wide or narrow: field multiplication on 32-bit\n"
     "                      or on 24-bit multipliers. Vulkan has both and measures them\n"
-    "                      where it cannot tell (AMD GPUs are far faster with narrow)\n"
+    "                      on AMD GPUs, which are far faster with narrow\n"
     "      --filter MODE   auto (default) or bitmap. Up to 12 prefixes are compared with\n"
     "                      each key directly; longer lists, or all with `bitmap`, go\n"
     "                      through bit tables in device memory\n"

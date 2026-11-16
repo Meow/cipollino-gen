@@ -209,7 +209,7 @@ measures at start-up. `--tune` measures more and prints the fastest setting as f
 | `--scratch` | Device memory traffic for arithmetic: `full` stores two field elements per key pair, `lean` one (one more squaring), `half` one per two pairs (half a multiplication more). Measured at start-up. |
 | `--threads` | More threads cost memory; too few leave the GPU idle. CUDA uses 2048 per multiprocessor, ROCm 1024 per multiprocessor (two compute units), Metal 65536. Vulkan measures: 1024 to 16384 on integrated GPUs, 16384 to 131072 on discrete AMD ones; other discrete GPUs get 131072. |
 | `--pairs` | Larger batches spread the one inversion per batch thinner (1% of the work at 512 pairs, 0.6% at 1024) and take `threads * pairs * 32` bytes in `lean` mode. |
-| `--arith` | The field multiplication: `wide` on 32x32 multiplies, `narrow` on 24-bit ones. Only Vulkan has both; it measures them on every GPU that is not NVIDIA's or Apple's, which get `wide`. |
+| `--arith` | The field multiplication: `wide` on 32x32 multiplies, `narrow` on 24-bit ones. Only Vulkan has both; it measures them on AMD GPUs and uses `wide` everywhere else. |
 | `--filter` | `bitmap` sends a short prefix list through the bit tables that long lists use. For comparing the two with `--bench`. |
 | `--launch-ms` | Longer launches cost less overhead and respond later. Windows resets a GPU that does not answer for two seconds. |
 

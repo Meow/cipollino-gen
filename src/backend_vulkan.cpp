@@ -227,13 +227,13 @@ namespace {
     // so narrow is 1.6 times as fast there. AMD's own drivers have another compiler:
     // measure both. Apple: an M5 Pro runs narrow at 0.42 of wide's speed. NVIDIA: not
     // run; by the instruction energies of an RTX 4090 narrow's 400 multiplies cost twice
-    // the 100 wide ones. Anything else is unknown: measure both.
+    // the 100 wide ones. Intel: the narrow kernel ends the process inside the Windows
+    // driver of a UHD 730, which no self-test can catch. So narrow is tried on AMD alone;
+    // --arith narrow asks for it anywhere.
     std::vector<uint32_t> arith_candidates() const override {
       if (amd())
         return { CIP_ARITH_NARROW, CIP_ARITH_WIDE };
-      if (nvidia() || apple())
-        return { CIP_ARITH_WIDE };
-      return { CIP_ARITH_WIDE, CIP_ARITH_NARROW };
+      return { CIP_ARITH_WIDE };
     }
 
     void set_arith(uint32_t arith) override {
