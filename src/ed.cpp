@@ -10,6 +10,27 @@ namespace ed {
   static fe g_sqrtm1; // sqrt(-1)
   static fe g_scale;  // sqrt(-486664), the factor between x and u/v
 
+  static fe sqn(fe a, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++)
+      a = fe_sq(a);
+    return a;
+  }
+
+  // z^(2^250 - 1), the long part of the exponent of a square root.
+  static fe pow_2_250_1(fe z) {
+    fe z2   = fe_sq(z);
+    fe z9   = fe_mul(sqn(z2, 2), z);
+    fe z11  = fe_mul(z9, z2);
+    fe z5   = fe_mul(fe_sq(z11), z9);    // 2^5 - 1
+    fe z10  = fe_mul(sqn(z5, 5), z5);    // 2^10 - 1
+    fe z20  = fe_mul(sqn(z10, 10), z10); // 2^20 - 1
+    fe z40  = fe_mul(sqn(z20, 20), z20); // 2^40 - 1
+    fe z50  = fe_mul(sqn(z40, 10), z10); // 2^50 - 1
+    fe z100 = fe_mul(sqn(z50, 50), z50); // 2^100 - 1
+    fe z200 = fe_mul(sqn(z100, 100), z100);
+    return fe_mul(sqn(z200, 50), z50);
+  }
+
   static fe small(uint32_t v) {
     fe r   = fe_one();
     r.v[0] = v;
@@ -76,18 +97,16 @@ namespace ed {
   void init() {
     g_d = neg(fe_mul(small(121665), fe_invert(small(121666))));
     // sqrt(-1) = 2^((p-1)/4) = 2^(2^253 - 5) = (2^(2^250 - 1))^8 * 2^3.
-    fe two      = small(2);
-    fe_pow250 t = fe_pow_2_250_1(two);
-    g_sqrtm1    = fe_mul(fe_sqn(t.z250, 3), small(8));
-    fe m1       = neg(fe_one());
+    fe two   = small(2);
+    g_sqrtm1 = fe_mul(sqn(pow_2_250_1(two), 3), small(8));
+    fe m1    = neg(fe_one());
     if (!equal(fe_sq(g_sqrtm1), m1))
       throw std::runtime_error("ed::init: sqrt(-1) self-check failed");
 
     // sqrt(-486664): s^((p+3)/8) with (p+3)/8 = 2^252 - 2, times sqrt(-1) if that is a
     // root of -s. The base point has to come out as u = 9 on the curve.
     fe s    = neg(small(486664));
-    t       = fe_pow_2_250_1(s);
-    g_scale = fe_mul(fe_mul(fe_sqn(t.z250, 2), s), s);
+    g_scale = fe_mul(fe_mul(sqn(pow_2_250_1(s), 2), s), s);
     if (!equal(fe_sq(g_scale), s))
       g_scale = fe_mul(g_scale, g_sqrtm1);
     Montgomery b = to_montgomery(base_mult_u64(1));
@@ -111,13 +130,12 @@ namespace ed {
     fe u  = fe_carry(fe_sub(y2, fe_one()));         // y^2 - 1
     fe v  = fe_carry(fe_one_plus(fe_mul(y2, g_d))); // d y^2 + 1
     // x = u v^3 (u v^7)^((p-5)/8), (p-5)/8 = 2^252 - 3
-    fe v3       = fe_mul(fe_sq(v), v);
-    fe v7       = fe_mul(fe_sq(v3), v);
-    fe uv7      = fe_mul(u, v7);
-    fe_pow250 t = fe_pow_2_250_1(uv7);
-    fe pw       = fe_mul(fe_sqn(t.z250, 2), uv7); // (uv^7)^(2^252 - 3)
-    fe x        = fe_mul(fe_mul(u, v3), pw);
-    fe vx2      = fe_mul(v, fe_sq(x));
+    fe v3  = fe_mul(fe_sq(v), v);
+    fe v7  = fe_mul(fe_sq(v3), v);
+    fe uv7 = fe_mul(u, v7);
+    fe pw  = fe_mul(sqn(pow_2_250_1(uv7), 2), uv7); // (uv^7)^(2^252 - 3)
+    fe x   = fe_mul(fe_mul(u, v3), pw);
+    fe vx2 = fe_mul(v, fe_sq(x));
     if (!equal(vx2, u)) {
       if (!equal(vx2, neg(u)))
         return false;

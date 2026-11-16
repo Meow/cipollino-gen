@@ -267,41 +267,6 @@ CIP_COLD_FN fe fe_mul_cold(fe f, fe g) { return fe_mul(f, g); }
 
 CIP_COLD_FN fe fe_sq_cold(fe f) { return fe_sq(f); }
 
-CIP_FN fe fe_sqn(fe a, u32 n) {
-  for (u32 i = 0u; i < n; i++)
-    a = fe_sq_cold(a);
-  return a;
-}
-
-// z^(2^250 - 1) and z^11, the shared prefix of inversion and square roots.
-struct fe_pow250 {
-  fe z250;
-  fe z11;
-};
-
-CIP_COLD_FN fe_pow250 fe_pow_2_250_1(fe z) {
-  fe_pow250 r;
-  fe z2   = fe_sq_cold(z);
-  fe z9   = fe_mul_cold(fe_sqn(z2, 2u), z);
-  fe z11  = fe_mul_cold(z9, z2);
-  fe z5   = fe_mul_cold(fe_sq_cold(z11), z9);   // 2^5 - 1
-  fe z10  = fe_mul_cold(fe_sqn(z5, 5u), z5);    // 2^10 - 1
-  fe z20  = fe_mul_cold(fe_sqn(z10, 10u), z10); // 2^20 - 1
-  fe z40  = fe_mul_cold(fe_sqn(z20, 20u), z20); // 2^40 - 1
-  fe z50  = fe_mul_cold(fe_sqn(z40, 10u), z10); // 2^50 - 1
-  fe z100 = fe_mul_cold(fe_sqn(z50, 50u), z50); // 2^100 - 1
-  fe z200 = fe_mul_cold(fe_sqn(z100, 100u), z100);
-  r.z250  = fe_mul_cold(fe_sqn(z200, 50u), z50);
-  r.z11   = z11;
-  return r;
-}
-
-// z^(p-2) = z^(2^255 - 21); z tight.
-CIP_COLD_FN fe fe_invert(fe z) {
-  fe_pow250 t = fe_pow_2_250_1(z);
-  return fe_mul_cold(fe_sqn(t.z250, 5u), t.z11);
-}
-
 // Tight field element <-> eight 32-bit words (the plain little-endian 256-bit integer).
 struct fe8 {
   u32 w[8];
@@ -340,7 +305,7 @@ CIP_FN fe fe_unpack(fe8 a) {
 // A round runs 30 steps on the low limbs alone and applies their sum to the four values
 // as one 2x2 matrix. 20 rounds reach g = 0 from any 256-bit value. Values are nine signed
 // limbs of 30 bits. Variable time is no concern: everything inverted here is public.
-CIP_COLD_FN fe fe_invert_gcd(fe z) {
+CIP_COLD_FN fe fe_invert(fe z) {
   const u32 m30 = 0x3fffffffu;
   const i32 s30 = 0x3fffffff;
   fe8 w         = fe_pack(z);
