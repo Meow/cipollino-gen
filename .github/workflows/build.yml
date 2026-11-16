@@ -154,11 +154,17 @@ jobs:
         shell: pwsh
         run: |
           dumpbin /dependents build\cipollino.exe
-          build\cipollino.exe --bench 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $failed = 0
+          foreach ($arguments in @('--bench 2', '--backend rocm --bench 2', '--backend cpu --bench 2')) {
+            & build\cipollino.exe ($arguments -split ' ')
+            "cipollino $arguments -> exit status $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0 -and $arguments -notlike '*rocm*') { $failed = 1 }
+          }
           $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike '*rocm*' }) -join ';'
           build\cipollino.exe --bench 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "without the HIP runtime -> exit status $LASTEXITCODE"
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          exit $failed
 
       - name: Package
         shell: pwsh
