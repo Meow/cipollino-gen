@@ -164,10 +164,14 @@ jobs:
             Copy-Item $found.FullName dist\
             dumpbin /dependents $found.FullName | Select-String '\.dll'
           }
-          foreach ($part in @("hip", "amd_comgr", "rocm-kpack", "rocm_kpack")) {
-            Get-ChildItem "$env:HIP_PATH\share\doc\$part\LICENSE*" -ErrorAction SilentlyContinue |
-              ForEach-Object { Copy-Item $_.FullName "dist\licenses\$part-$($_.Name)" }
-          }
+          # The licence texts the wheels bring for those three, and a note on where they are from.
+          Get-ChildItem "$env:HIP_PATH\share\doc" -Directory | Where-Object { $_.Name -match '^(hip|hipcc|clr|rocclr|amd_comgr|rocm[-_]kpack)$' } |
+            ForEach-Object { $part = $_.Name; Get-ChildItem "$($_.FullName)\LICENSE*" |
+              ForEach-Object { Copy-Item $_.FullName "dist\licenses\$part-$($_.Name)" } }
+          @("amdhip64_7.dll, rocm_kpack.dll and amd_comgr.dll are AMD's HIP runtime, unchanged, from the",
+            "ROCm $env:ROCM_VERSION wheels (https://github.com/ROCm/TheRock). Their licence texts, as far as",
+            "the wheels carry them, are in the licenses directory.") | Set-Content dist\NOTICE.txt
+          (Get-ChildItem "$env:HIP_PATH\share\doc" -Directory).Name -join ' '
           Get-ChildItem dist -Recurse | Format-Table Name, Length
 
       # Away from ROCm's own directories, as on a machine that has neither ROCm nor an
