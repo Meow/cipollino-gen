@@ -1,5 +1,5 @@
 // C ABI over the kernel field arithmetic so tests/test_field.py can drive it with
-// Python big integers as the oracle.
+// Python big integers as the oracle. Built once per field arithmetic (-DCIP_ARITH=n).
 #define CIP_TARGET_CPU
 #include "kernel/defs.h"
 #include "kernel/field.h"
@@ -23,7 +23,9 @@ static void out(u32 *p, fe a)
 #endif
 
 extern "C" {
+T_API u32 t_arith() { return CIP_ARITH; }
 T_API void t_mul(u32 *r, const u32 *a, const u32 *b) { out(r, fe_mul(in(a), in(b))); }
+T_API void t_mul_t(u32 *r, const u32 *a, const u32 *b) { out(r, fe_mul_t(in(a), in(b))); }
 T_API void t_sq(u32 *r, const u32 *a) { out(r, fe_sq(in(a))); }
 T_API void t_carry(u32 *r, const u32 *a) { out(r, fe_carry(in(a))); }
 T_API void t_add(u32 *r, const u32 *a, const u32 *b) { out(r, fe_add(in(a), in(b))); }

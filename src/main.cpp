@@ -34,6 +34,9 @@ static void usage(FILE *out)
         "      --scratch MODE  auto (default: measure at start-up), full, lean or half: trade\n"
         "                      device memory traffic (64/32/16 bytes per key pair) against\n"
         "                      a little arithmetic\n"
+        "      --arith MODE    auto (default), wide or narrow: field multiplication on 32-bit\n"
+        "                      or on 24-bit multipliers. Vulkan has both and measures them\n"
+        "                      where it cannot tell (AMD GPUs are far faster with narrow)\n"
         "      --filter MODE   auto (default) or bitmap. Up to 12 prefixes are compared with\n"
         "                      each key directly; longer lists, or all with `bitmap`, go\n"
         "                      through bit tables in device memory\n"
@@ -137,6 +140,13 @@ int main(int argc, char **argv)
             opt.scratch = m == "full" ? 2 : m == "lean" ? 1 : m == "half" ? 0 : -1;
             if (opt.scratch < 0 && m != "auto") {
                 fprintf(stderr, "error: --scratch wants auto, full, lean or half\n");
+                return 2;
+            }
+        } else if (a == "--arith") {
+            std::string m = text();
+            opt.arith = m == "wide" ? 0 : m == "narrow" ? 1 : -1;
+            if (opt.arith < 0 && m != "auto") {
+                fprintf(stderr, "error: --arith wants auto, wide or narrow\n");
                 return 2;
             }
         } else if (a == "--filter") {

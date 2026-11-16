@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,9 @@ public:
     // Defaults for this device: kernel thread count, how many bytes of scratch memory
     // the search may reasonably take, and the scratch mode to use when not calibrating.
     virtual uint32_t suggested_threads() const = 0;
+    // Thread counts worth trying where the device's width is not known, ascending; with
+    // more than one, the engine measures them at start-up.
+    virtual std::vector<uint32_t> thread_candidates() const { return {suggested_threads()}; }
     virtual uint64_t scratch_budget() const = 0;
     virtual uint32_t suggested_pairs() const = 0;
     // Scratch modes (CIP_SCRATCH_*) worth trying on this device; with more than one, the
@@ -31,6 +35,15 @@ public:
     virtual std::vector<uint32_t> scratch_candidates() const = 0;
     // Preferred wall time of one launch, in seconds.
     virtual double suggested_launch_seconds() const { return 0.25; }
+    // Field arithmetics (CIP_ARITH_*) worth trying on this device, the likeliest winner
+    // first; with more than one, the engine measures each at start-up and keeps the fastest.
+    virtual std::vector<uint32_t> arith_candidates() const { return {0}; }
+    // Use the kernels built for this field arithmetic from the next configure() on. Throws
+    // if the backend has none; all have CIP_ARITH_WIDE (0).
+    virtual void set_arith(uint32_t arith)
+    {
+        if (arith != 0) throw std::runtime_error(describe() + ": this backend has no kernel for that arithmetic");
+    }
 
     // Allocate device buffers for `nthreads` kernel threads and `npairs` pairs per batch
     // in scratch mode `smode` (CIP_SCRATCH_*), and upload the precomputed table

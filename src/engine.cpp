@@ -146,6 +146,8 @@ const char *scratch_name(uint32_t smode)
     return smode == CIP_SCRATCH_FULL ? "full" : smode == CIP_SCRATCH_LEAN ? "lean" : "half";
 }
 
+const char *arith_name(uint32_t arith) { return arith == CIP_ARITH_NARROW ? "narrow" : "wide"; }
+
 // Largest power-of-two batch size up to the backend's preference whose scratch fits its
 // memory budget and the kernel's 32-bit scratch index.
 uint32_t fit_pairs(const Backend &be, uint32_t nthreads, uint32_t smode)
@@ -166,9 +168,10 @@ void check_config(uint32_t nthreads, uint32_t npairs, uint32_t smode)
         throw std::runtime_error("threads * pairs is too large: the scratch buffer is limited to 16 GiB");
 }
 
-// Keys per second of a configuration, measured over about `seconds` of launches. Leaves
-// the device configured that way with `start` (state words for `nthreads` threads) loaded
-// and advanced by an unspecified number of batches.
+// Keys per second of a configuration, with the field arithmetic the backend was last set
+// to, measured over about `seconds` of launches. Leaves the device configured that way with
+// `start` (state words for `nthreads` threads) loaded and advanced by an unspecified number
+// of batches.
 double measure(Backend &be, uint32_t nthreads, uint32_t npairs, uint32_t smode, const Filter &filter,
                const std::vector<uint32_t> &start, double seconds)
 {
@@ -222,63 +225,52 @@ public:
     void setup()
     {
         const Options &opt = sh_.opt;
-        T_ = opt.threads ? opt.threads : be_.suggested_threads();
-        if (T_ == 0) throw std::runtime_error("threads must be positive");
-        seeds_.reset(new SeedStore(T_));
-        base_.assign(T_, 0);
-        std::vector<uint32_t> start = make_seeds(*seeds_, 0, T_);
-
-        // Which scratch mode is fastest depends on how the device's arithmetic throughput
-        // compares with its memory bandwidth, so unless told, measure the candidates.
+        std::vector<uint32_t> counts = opt.threads ? std::vector<uint32_t>{opt.threads} : be_.thread_candidates();
         std::vector<uint32_t> modes = opt.scratch >= 0 ? std::vector<uint32_t>{(uint32_t)opt.scratch} : be_.scratch_candidates();
-        struct Trial {
-            uint32_t mode, pairs;
-            double rate;
-        };
-        std::vector<Trial> trials;
-        std::string report, problem;
-        double best = -1;
-        for (uint32_t mode : modes) {
-            uint32_t n = opt.pairs ? opt.pairs : fit_pairs(be_, T_, mode);
-            double rate = 0;
+        std::vector<uint32_t> ariths = opt.arith >= 0 ? std::vector<uint32_t>{(uint32_t)opt.arith} : be_.arith_candidates();
+        const uint32_t most = *std::max_element(counts.begin(), counts.end());
+        if (*std::min_element(counts.begin(), counts.end()) == 0) throw std::runtime_error("threads must be positive");
+        seeds_.reset(new SeedStore(most));
+        const std::vector<uint32_t> start = make_seeds(*seeds_, 0, most);
+
+        // What the backend cannot know about its device is measured: thread count, field
+        // arithmetic, scratch mode, in that order. A kernel is only as good as the driver's
+        // compiler, so the configuration that comes out of it has to pass the self-test,
+        // and an arithmetic that does not (or does not compile) is dropped while there is
+        // another to fall back to.
+        for (;;) {
+            arith_ = ariths[0];
+            std::string why;
             try {
-                check_config(T_, n, mode);
-                if (modes.size() > 1) rate = measure(be_, T_, n, mode, sh_.filter, start, 0.2);
+                be_.set_arith(arith_);
+                pick_threads(counts, modes[0], start);
+                pick_arith(ariths, modes[0], start);
+                pick_scratch(modes, start);
+
+                base_.assign(T_, 0);
+                batches_ = 0;
+                be_.configure(T_, N_, smode_, ed::build_table(N_));
+                be_.write_state(0, T_, start.data());
+                // Planted needles: derive a handful of this device's candidate keys on the
+                // CPU, search for exactly those, and require the GPU to report exactly them.
+                if (needle_test(3, why) && needle_test(24, why)) break;
+                why = "start-up self-test failed: " + why;
             } catch (const std::exception &e) {
-                problem = e.what();  // e.g. this mode does not fit the device's memory
-                continue;
+                if (ariths.size() < 2) throw;
+                why = e.what();
             }
-            if (modes.size() > 1) report += std::string(report.empty() ? "" : ", ") + scratch_name(mode) + " " + human(rate, "keys/s");
-            trials.push_back(Trial{mode, n, rate});
-            best = std::max(best, rate);
+            if (ariths.size() < 2) throw std::runtime_error(be_.describe() + ": " + why);
+            if (!opt.quiet)
+                sh_.say("device " + std::to_string(index_) + ": not using the " + arith_name(arith_) + " arithmetic: " + why);
+            ariths.erase(std::find(ariths.begin(), ariths.end(), arith_));
         }
-        if (trials.empty()) throw std::runtime_error(problem);
-        // Differences under 2% are measurement noise: among the modes that close to the
-        // fastest, take the one that needs the least device memory.
-        const Trial *pick = nullptr;
-        for (const Trial &t : trials)
-            if (t.rate >= 0.98 * best &&
-                (!pick || scratch_bytes(T_, t.pairs, t.mode) < scratch_bytes(T_, pick->pairs, pick->mode)))
-                pick = &t;
-        smode_ = pick->mode;
-        N_ = pick->pairs;
-        if (modes.size() > 1 && !opt.quiet)
-            sh_.say("device " + std::to_string(index_) + ": scratch modes: " + report + " -> " + scratch_name(smode_));
 
-        be_.configure(T_, N_, smode_, ed::build_table(N_));
-        be_.write_state(0, T_, start.data());
-
-        // Planted needles: derive a handful of this device's candidate keys on the CPU,
-        // search for exactly those, and require the GPU to report exactly them.
-        std::string why;
-        if (!needle_test(3, why) || !needle_test(24, why))
-            throw std::runtime_error(be_.describe() + ": start-up self-test failed: " + why);
         be_.set_filter(sh_.filter);
         if (!opt.quiet) {
             char buf[256];
-            snprintf(buf, sizeof buf, "device %d: %s | %u threads x %u keys/batch | %.0f MiB scratch (%s) | self-test ok",
+            snprintf(buf, sizeof buf, "device %d: %s | %u threads x %u keys/batch | %.0f MiB scratch (%s)%s | self-test ok",
                      index_, be_.describe().c_str(), T_, 2 * N_ + 1, scratch_bytes(T_, N_, smode_) / 1048576.0,
-                     scratch_name(smode_));
+                     scratch_name(smode_), arith_ == CIP_ARITH_NARROW ? " | narrow arithmetic" : "");
             sh_.say(buf);
         }
     }
@@ -295,6 +287,108 @@ public:
     }
 
 private:
+    // Keys per second of a candidate configuration; 0, with the reason in `problem`, if
+    // the device cannot run it (e.g. it does not fit the device's memory).
+    double trial(uint32_t threads, uint32_t pairs, uint32_t mode, const std::vector<uint32_t> &start, std::string &problem)
+    {
+        try {
+            check_config(threads, pairs, mode);
+            return measure(be_, threads, pairs, mode, sh_.filter, start, 0.2);
+        } catch (const std::exception &e) {
+            problem = e.what();
+            return 0;
+        }
+    }
+
+    void report(const char *what, const std::string &rates, const std::string &choice)
+    {
+        if (!sh_.opt.quiet) sh_.say("device " + std::to_string(index_) + ": " + what + ": " + rates + " -> " + choice);
+    }
+
+    // How many threads a device keeps busy, and how much scratch memory it can cycle
+    // through without stalling, is not something every API tells. The candidates come in
+    // ascending order and the rate has one peak, so the search ends once it has fallen 10%
+    // below the best. Differences under 2% are measurement noise: among the counts that
+    // close to the fastest, take the lowest.
+    void pick_threads(const std::vector<uint32_t> &counts, uint32_t mode, const std::vector<uint32_t> &start)
+    {
+        T_ = counts[0];
+        if (counts.size() < 2) return;
+        std::vector<double> rates;
+        std::string list, problem;
+        double best = 0;
+        for (uint32_t t : counts) {
+            rates.push_back(trial(t, sh_.opt.pairs ? sh_.opt.pairs : fit_pairs(be_, t, mode), mode, start, problem));
+            list += std::string(list.empty() ? "" : ", ") + std::to_string(t) + " " + (rates.back() > 0 ? human(rates.back(), "keys/s") : "-");
+            best = std::max(best, rates.back());
+            if (rates.back() < 0.9 * best) break;
+        }
+        if (best <= 0) throw std::runtime_error(problem);
+        T_ = 0;
+        for (size_t i = 0; i < rates.size(); i++)
+            if (rates[i] >= 0.98 * best && (T_ == 0 || counts[i] < T_)) T_ = counts[i];
+        report("threads", list, std::to_string(T_));
+    }
+
+    // Which field arithmetic is faster depends on the device's multipliers and on what its
+    // compiler makes of them. To replace the backend's first choice another has to be 2%
+    // faster, which is more than the measurement's noise.
+    void pick_arith(const std::vector<uint32_t> &ariths, uint32_t mode, const std::vector<uint32_t> &start)
+    {
+        if (ariths.size() < 2) return;
+        const uint32_t n = sh_.opt.pairs ? sh_.opt.pairs : fit_pairs(be_, T_, mode);
+        std::string list, problem;
+        double best = 0;
+        for (uint32_t a : ariths) {
+            be_.set_arith(a);
+            double rate = trial(T_, n, mode, start, problem);
+            list += std::string(list.empty() ? "" : ", ") + arith_name(a) + " " + (rate > 0 ? human(rate, "keys/s") : "-");
+            if (rate > 1.02 * best) {
+                best = rate;
+                arith_ = a;
+            }
+        }
+        be_.set_arith(arith_);
+        if (best <= 0) throw std::runtime_error(problem);
+        report("field arithmetic", list, arith_name(arith_));
+    }
+
+    // Which scratch mode is fastest depends on how the device's arithmetic throughput
+    // compares with its memory bandwidth. Among the modes within 2% of the fastest, take
+    // the one that needs the least device memory.
+    void pick_scratch(const std::vector<uint32_t> &modes, const std::vector<uint32_t> &start)
+    {
+        struct Trial {
+            uint32_t mode, pairs;
+            double rate;
+        };
+        std::vector<Trial> trials;
+        std::string list, problem;
+        double best = 0;
+        for (uint32_t mode : modes) {
+            uint32_t n = sh_.opt.pairs ? sh_.opt.pairs : fit_pairs(be_, T_, mode);
+            double rate = 0;
+            if (modes.size() > 1) {
+                rate = trial(T_, n, mode, start, problem);
+                if (rate <= 0) continue;
+                list += std::string(list.empty() ? "" : ", ") + scratch_name(mode) + " " + human(rate, "keys/s");
+            } else {
+                check_config(T_, n, mode);
+            }
+            trials.push_back(Trial{mode, n, rate});
+            best = std::max(best, rate);
+        }
+        if (trials.empty()) throw std::runtime_error(problem);
+        const Trial *pick = nullptr;
+        for (const Trial &t : trials)
+            if (t.rate >= 0.98 * best &&
+                (!pick || scratch_bytes(T_, t.pairs, t.mode) < scratch_bytes(T_, pick->pairs, pick->mode)))
+                pick = &t;
+        smode_ = pick->mode;
+        N_ = pick->pairs;
+        if (modes.size() > 1) report("scratch modes", list, scratch_name(smode_));
+    }
+
     bool needle_test(unsigned count, std::string &why)
     {
         const uint32_t nb = 2;
@@ -425,7 +519,7 @@ private:
     Backend &be_;
     Shared &sh_;
     int index_;
-    uint32_t T_ = 0, N_ = 0, smode_ = CIP_SCRATCH_LEAN;
+    uint32_t T_ = 0, N_ = 0, smode_ = CIP_SCRATCH_LEAN, arith_ = CIP_ARITH_WIDE;
     uint64_t batches_ = 0;                // batches every thread has run so far
     std::vector<uint64_t> base_;          // value of batches_ when each thread was last seeded
     std::unique_ptr<SeedStore> seeds_;
@@ -531,37 +625,45 @@ int run_tune(std::vector<std::unique_ptr<Backend>> &backends, const Options &opt
         std::vector<uint32_t> counts;
         for (uint32_t t : {base / 2, base, base * 2, base * 4})
             if (t > 0) counts.push_back(t);
-        printf("device %zu: %s\n%10s %8s %8s %12s %14s\n", dev, be.describe().c_str(), "threads", "pairs", "scratch",
-               "memory", "keys/s");
+        // Where the backend has a range of its own to search, that is the one to show.
+        if (!opt.threads && be.thread_candidates().size() > 1) counts = be.thread_candidates();
+        std::sort(counts.begin(), counts.end());
+        const std::vector<uint32_t> ariths = opt.arith >= 0 ? std::vector<uint32_t>{(uint32_t)opt.arith} : be.arith_candidates();
+        printf("device %zu: %s\n%10s %8s %8s %8s %12s %14s\n", dev, be.describe().c_str(), "threads", "pairs", "scratch",
+               "arith", "memory", "keys/s");
         try {
             SeedStore seeds(counts.back());
             std::vector<uint32_t> start = make_seeds(seeds, 0, counts.back());
             double best = 0;
-            uint32_t best_t = 0, best_n = 0, best_mode = 0;
-            for (uint32_t t : counts)
-                for (uint32_t mode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
-                    if (g_stop) return 130;
-                    uint32_t n = opt.pairs ? opt.pairs : fit_pairs(be, t, mode);
-                    double rate = 0;
-                    std::string note;
-                    try {
-                        check_config(t, n, mode);
-                        rate = measure(be, t, n, mode, filter, start, 1.0);
-                    } catch (const std::exception &e) {
-                        note = e.what();
+            uint32_t best_t = 0, best_n = 0, best_mode = 0, best_arith = 0;
+            for (uint32_t arith : ariths)
+                for (uint32_t t : counts)
+                    for (uint32_t mode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
+                        if (g_stop) return 130;
+                        uint32_t n = opt.pairs ? opt.pairs : fit_pairs(be, t, mode);
+                        double rate = 0;
+                        std::string note;
+                        try {
+                            check_config(t, n, mode);
+                            be.set_arith(arith);
+                            rate = measure(be, t, n, mode, filter, start, 1.0);
+                        } catch (const std::exception &e) {
+                            note = e.what();
+                        }
+                        printf("%10u %8u %8s %8s %8.0f MiB %14s %s\n", t, n, scratch_name(mode), arith_name(arith),
+                               scratch_bytes(t, n, mode) / 1048576.0, rate > 0 ? human(rate, "").c_str() : "-", note.c_str());
+                        fflush(stdout);
+                        if (rate > best) {
+                            best = rate;
+                            best_t = t;
+                            best_n = n;
+                            best_mode = mode;
+                            best_arith = arith;
+                        }
                     }
-                    printf("%10u %8u %8s %8.0f MiB %14s %s\n", t, n, scratch_name(mode),
-                           scratch_bytes(t, n, mode) / 1048576.0, rate > 0 ? human(rate, "").c_str() : "-", note.c_str());
-                    fflush(stdout);
-                    if (rate > best) {
-                        best = rate;
-                        best_t = t;
-                        best_n = n;
-                        best_mode = mode;
-                    }
-                }
             if (best > 0)
-                printf("fastest: --threads %u --pairs %u --scratch %s   (%s)\n\n", best_t, best_n, scratch_name(best_mode),
+                printf("fastest: --threads %u --pairs %u --scratch %s%s%s   (%s)\n\n", best_t, best_n, scratch_name(best_mode),
+                       ariths.size() > 1 ? " --arith " : "", ariths.size() > 1 ? arith_name(best_arith) : "",
                        human(best, "keys/s").c_str());
         } catch (const std::exception &e) {
             fprintf(stderr, "error: %s\n", e.what());
@@ -581,10 +683,11 @@ struct Candidate {
     std::string address;
 };
 
-bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t smode, std::string &log)
+bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t smode, uint32_t arith, std::string &log)
 {
     char tag[96];
-    snprintf(tag, sizeof tag, "T=%u N=%u batches=%u scratch=%s", T, N, nb, scratch_name(smode));
+    snprintf(tag, sizeof tag, "T=%u N=%u batches=%u scratch=%s arith=%s", T, N, nb, scratch_name(smode), arith_name(arith));
+    be.set_arith(arith);
     be.configure(T, N, smode, ed::build_table(N));
     SeedStore seeds(T);
     seed_threads(be, seeds, 0, T);
@@ -715,11 +818,19 @@ bool exhaustive_case(Backend &be, uint32_t T, uint32_t N, uint32_t nb, uint32_t 
 
 bool selftest_exhaustive(Backend &be, std::string &log)
 {
-    for (uint32_t smode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
-        uint32_t odd = smode == CIP_SCRATCH_HALF ? 1 : 0;  // half mode needs an even batch size
-        if (!exhaustive_case(be, 5, 1 + odd, 3, smode, log) || !exhaustive_case(be, 33, 7 + odd, 2, smode, log) ||
-            !exhaustive_case(be, 64, 48, 3, smode, log) || !exhaustive_case(be, 300, 16, 1, smode, log))
-            return false;
+    // Every arithmetic the backend has kernels for, not only those it would pick.
+    for (uint32_t arith : {CIP_ARITH_WIDE, CIP_ARITH_NARROW}) {
+        try {
+            be.set_arith(arith);
+        } catch (const std::exception &) {
+            continue;
+        }
+        for (uint32_t smode : {CIP_SCRATCH_FULL, CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF}) {
+            uint32_t odd = smode == CIP_SCRATCH_HALF ? 1 : 0;  // half mode needs an even batch size
+            if (!exhaustive_case(be, 5, 1 + odd, 3, smode, arith, log) || !exhaustive_case(be, 33, 7 + odd, 2, smode, arith, log) ||
+                !exhaustive_case(be, 64, 48, 3, smode, arith, log) || !exhaustive_case(be, 300, 16, 1, smode, arith, log))
+                return false;
+        }
     }
     return true;
 }

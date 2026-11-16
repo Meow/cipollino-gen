@@ -153,6 +153,15 @@ typedef uint64_t u64;
 #endif
 #endif
 
+// Field multiplication (see field.h): on 32x32->64 products, or on 24-bit multipliers
+// (field13.h). Which is faster is a property of the GPU and of its compiler; the backends
+// that can know say so in arith_candidates().
+#define CIP_ARITH_WIDE 0
+#define CIP_ARITH_NARROW 1
+#ifndef CIP_ARITH
+#define CIP_ARITH CIP_ARITH_WIDE
+#endif
+
 #define CIP_STATE_WORDS 20u  // per thread: x and y of its centre, 10 limbs each
 #define CIP_HIT_WORDS 3u
 

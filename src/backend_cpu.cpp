@@ -64,6 +64,13 @@ public:
     uint32_t suggested_pairs() const override { return 256; }
     std::vector<uint32_t> scratch_candidates() const override { return {CIP_SCRATCH_LEAN}; }
 
+    // One kernel, with the field arithmetic this file was compiled for (CIP_ARITH).
+    std::vector<uint32_t> arith_candidates() const override { return {CIP_ARITH}; }
+    void set_arith(uint32_t arith) override
+    {
+        if (arith != CIP_ARITH) throw std::runtime_error(describe() + ": not built with that field arithmetic");
+    }
+
     void configure(uint32_t nthreads, uint32_t npairs, uint32_t smode, const std::vector<uint32_t> &table) override
     {
         prm_ = cip_params();

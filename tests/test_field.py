@@ -17,6 +17,7 @@ TIGHT = [1 << 26, 1 << 25] * 4 + [1 << 26, 1 << 26]
 LOOSE = [3 << 26, 3 << 25] * 4 + [3 << 26, 5 << 25]
 
 lib = ctypes.CDLL(sys.argv[1])
+NARROW = lib.t_arith() == 1  # the library was built with CIP_ARITH=1 (field13.h)
 U10 = ctypes.c_uint32 * 10
 U8 = ctypes.c_uint32 * 8
 lib.t_low32.restype = ctypes.c_uint32
@@ -57,7 +58,7 @@ def canonical_limbs(x):
 def assert_tight(l, what):
     for i, (x, b) in enumerate(zip(l, TIGHT)):
         assert x < b, f"{what}: limb {i} = {x} not tight"
-    assert l[9] < (1 << 25) + (1 << 13), f"{what}: top limb {l[9]}"
+    assert l[9] < (1 << 25) + (1 << (20 if NARROW else 13)), f"{what}: top limb {l[9]}"
 
 
 def main():
@@ -79,6 +80,13 @@ def main():
             n_unsure += 1
         elif not (P <= (v % 2**255) + 19 * (v >> 255)):
             assert lo == (v % P) & 0xFFFFFFFF, ("probe", f, g)
+
+        # the search loop's own products: tight times tight, 1 - tight or 1 + tight
+        ft, gt = rand_limbs(TIGHT, rng), rand_limbs(TIGHT, rng)
+        gt = [gt, call(lib.t_one_minus, gt), call(lib.t_one_plus, gt)][rng.randrange(3)]
+        ht = call(lib.t_mul_t, ft, gt)
+        assert_tight(ht, "mul_t")
+        assert val(ht) % P == val(ft) * val(gt) % P, ("mul_t", ft, gt)
 
         t = rand_limbs(TIGHT, rng)
         s = call(lib.t_sq, t)
@@ -130,7 +138,8 @@ def main():
         r = call(lib.t_invert, a)
         assert val(r) * val(a) % P == 1
     # Uniformly random operands: the probe may only be wrong where it says it is unsure,
-    # and that has to stay rare (expected: 1 in 4096) or the kernel's fallback gets hot.
+    # and that has to stay rare (expected: 1 in 4096, with the narrow arithmetic 1 in
+    # 130000) or the kernel's fallback gets hot.
     forced = 0
     for it in range(200000):
         f, g = [rng.randrange(b) for b in TIGHT], [rng.randrange(b) for b in TIGHT]
@@ -141,7 +150,8 @@ def main():
         else:
             forced += 1
     assert forced < 150, f"probe unsure {forced} times in 200000"
-    print(f"field: ok ({n} rounds; probe unsure on {n_unsure} edge-case and {forced}/200000 random products)")
+    print(f"field ({'narrow' if NARROW else 'wide'}): ok ({n} rounds; probe unsure on {n_unsure} edge-case and "
+          f"{forced}/200000 random products)")
 
 if __name__ == "__main__":
     main()

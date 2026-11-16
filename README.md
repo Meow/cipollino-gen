@@ -150,6 +150,7 @@ cipollino [options] PREFIX [PREFIX...]
       --threads T     kernel threads per device
       --pairs N       pairs per batch; a batch tests 2N+1 keys per thread
       --scratch MODE  auto, full, lean or half (see Tuning)
+      --arith MODE    auto, wide or narrow (see Tuning)
       --filter MODE   auto or bitmap (see Tuning)
       --launch-ms MS  target duration of one kernel launch
       --bench [SECS]  measure throughput, write nothing
@@ -190,16 +191,14 @@ Measured with `cipollino --bench`:
 | Apple M5 Pro, first ~20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
 | Apple M5 Pro, sustained (laptop in "Automatic" power mode, heat-soaked) | Metal | 1.0 - 1.5 G |
 | Apple M5 Pro, 18 cores | CPU fallback | 150 M |
-| AMD Radeon 610M (the 2-CU iGPU of a Ryzen 9 7950X) | ROCm 6.4 | 100 M |
-| AMD Radeon 610M | Vulkan (RADV) | 53 M |
+| AMD Radeon 610M (the 2-CU iGPU of a Ryzen 9 9900X) | ROCm 6.4 | 105 M |
+| AMD Radeon 610M | Vulkan (RADV, Mesa 25.2) | 90 M |
 
 The 4090 and the Radeon were measured in the Docker images. With `auto`, a native API is
 preferred over Vulkan (CUDA, ROCm, Metal, then Vulkan); they are never mixed, as that
 would drive one GPU twice.
 
-No discrete AMD or any Intel GPU has been tried; the Radeon 610M's results also jump
-between about 60 and 105 M keys/s depending on thread count and scratch mode in a way I
-have not explained.
+No discrete AMD or any Intel GPU has been tried.
 
 ### What limits the 4090
 
@@ -236,6 +235,44 @@ CTX SWITCH TIMEOUT`). With 250 ms launches that meant 4.4 s stalls every ten sec
 so, with 500 ms launches a lost device. The Vulkan backend therefore keeps launches on
 NVIDIA to 50 ms, which bounds a stall to under a second; `--launch-ms` overrides that at
 your own risk.
+
+### AMD: ROCm against Vulkan
+
+On NVIDIA the Vulkan kernel is as fast as the CUDA one. On the Radeon 610M it ran at 43 M
+keys/s against ROCm's 96 M. Three things were behind that, found with loops of single
+instructions on that GPU; with them fixed Vulkan reaches 90 M and ROCm 105 M.
+
+- **Multiplies.** On this GPU (RDNA 2) a 32x32 multiply, either half of the product,
+  takes as long as 4.5 additions; a multiply of two values below 2^24 takes as long as
+  one, and can absorb an addition. ROCm's compiler turns `column += (u64)a * b` into one
+  slow instruction (`v_mad_u64_u32`). Mesa's, which is what Vulkan means on Linux, needs
+  two slow multiplies and a two-instruction carry for it, in Mesa 26.2 as in 25.2: 3.97
+  ns per field multiplication against 1.67. So the Vulkan backend has a second
+  multiplication (`src/kernel/field13.h`), which cuts every limb into two halves of 13
+  bits: 400 fast multiply-adds into 32-bit columns and 200 instructions of splitting and
+  carrying, 2.16 ns. With it a key pair takes about 6000 instructions, and at 90 M keys/s
+  the GPU has no more to give (it runs 276 G simple instructions a second); ROCm's
+  kernel is the shorter one, hence the rest of the gap.
+- **Threads.** Vulkan has no way to ask how wide a GPU is and gave integrated ones 16384
+  threads. This one is fastest at 1024 to 2048 and a third slower at 16384, so on
+  integrated GPUs the count is now measured at start-up.
+- **Scratch layout.** Keeping a thread's scratch slot contiguous instead of spreading it
+  over eight places is never slower on this GPU and up to a third faster, depending on
+  thread count and scratch mode, on both APIs. ROCm also does 5% better with batches of
+  512 pairs than of 1024. Both are the defaults now.
+
+The 13-bit multiplication is only for compilers that need it. An Apple M5 Pro runs it at
+0.42 of the speed of the wide one, an NVIDIA GPU should need about twice the energy per
+key (not measured), and under ROCm it is slower too (2.61 ns). There it is also wrong:
+LLVM's AMD backend takes a sum of products of two values masked to 13 bits for a dot
+product of bytes and emits `v_dot4_u32_u8` (`handleMulOperand` in `SIISelLowering.cpp`
+accepts an operand whose second byte it could not analyse). ROCm 6.4's compiler and Mesa's
+LLVM path with LLVM 20.1 both do it, and the code is unchanged in LLVM's main branch. So
+ROCm keeps the wide multiplication, and on Vulkan the start-up self-test decides: a
+multiplication whose kernel does not find the keys planted for it is dropped (`not using
+the narrow arithmetic: ...`) and the other one used. That is what happens under
+`RADV_DEBUG=llvm`. Which of the two AMD's own Windows driver wants is not known yet; both
+are measured there.
 
 ## How it works
 
@@ -294,7 +331,9 @@ prefixes on 64 bits on the GPU and then in full on the CPU.
 The kernel (`src/kernel/`) is written in the common subset of CUDA/HIP C++, the Metal
 Shading Language, Vulkan GLSL and plain C++ (a handful of macros cover casts, buffers
 and inlining), so one source is compiled by nvcc, hipcc, the Metal compiler,
-glslang and the host compiler.
+glslang and the host compiler. The field multiplication exists twice, on 32-bit and on
+24-bit multipliers (see "AMD: ROCm against Vulkan"); the Vulkan backend carries a kernel
+for each.
 
 ## Security
 
@@ -350,11 +389,15 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
   memory among those within 2% of it. On an RTX 4090 `lean` wins (16.6 G keys/s against
   15.0 for `half` and 13.9 for `full`, which saturates the memory bus), on Apple GPUs too.
 - `--threads`: CUDA defaults to 2048 per multiprocessor (262144 on a 4090), ROCm to 1024
-  per compute unit as the runtime counts them, Metal to 65536. Vulkan cannot ask a device how wide it is and uses 131072
-  for discrete GPUs, 16384 for integrated ones. More threads cost memory; too few leave
-  the GPU idle.
-- `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024);
-  memory is `threads * pairs * 32` bytes in `lean` mode.
+  per compute unit as the runtime counts them, Metal to 65536. Vulkan cannot ask a device
+  how wide it is: it uses 131072 for discrete GPUs and measures 1024 to 16384 at start-up
+  for integrated ones. More threads cost memory; too few leave the GPU idle.
+- `--pairs`: bigger batches amortise the per-batch inversion (1.5% overhead at 1024, 3%
+  at 512); memory is `threads * pairs * 32` bytes in `lean` mode.
+- `--arith` chooses the field multiplication: `wide` builds 64-bit columns from 32x32
+  products, `narrow` uses 13-bit half-limbs and 24-bit multiplies. Only the Vulkan
+  backend has both. On AMD GPUs, and on GPUs nobody has tried, it measures the two at
+  start-up; NVIDIA and Apple GPUs get `wide`.
 - `--filter bitmap` sends even a short prefix list through the bit tables instead of the
   direct comparison, to compare the two with `--bench`. The direct comparison costs
   about 70 simple instructions per key pair with twelve slots and touches no memory; a
@@ -363,9 +406,10 @@ Defaults are per backend; `--tune` measures alternatives on your hardware.
   usual rate on an RTX 4090 that way; on the M5 Pro neither that nor the present filter
   costs anything measurable (5 000 prefixes: 1.6 G keys/s, was 1.16).
 - The scratch layout is a build option per backend (`CUDA_AOS`, `ROCM_AOS`, `VULKAN_AOS`,
-  1 = each thread's slot contiguous, 0 = one word per thread side by side). CUDA and
-  Metal use 1, which is 10% faster on the 4090 in `lean` mode; for Vulkan and for ROCm
-  on the Radeon 610M the two measured the same and they stay at 0.
+  1 = each thread's slot contiguous, 0 = one word per thread side by side). All use 1:
+  it is 10% faster on the 4090 under CUDA in `lean` mode, up to a third faster on the
+  Radeon 610M under ROCm and Vulkan, and makes no difference on the M5 Pro. The 4090
+  under Vulkan has not been measured with it.
 
 On a laptop the GPU is thermally limited within a minute; macOS's High Power mode, where
 available, raises the sustained rate.
@@ -379,9 +423,13 @@ make docker-rocm-test   # ROCm and Vulkan in the ROCm container
 ```
 
 - `tests/test_field.py`: field arithmetic against Python big integers, including the
-  worst-case limb values of every operand class and the documented output bounds.
-- `--selftest` on the CPU backend and every GPU backend in the build, and on the CUDA
-  backend compiled against `tests/cuda_sim.h`.
+  worst-case limb values of every operand class and the documented output bounds, for
+  both multiplications.
+- `tools/gen_field13.py --check`: `field13.h` is what its generator writes, which also
+  means the generator's bounds hold for it.
+- `--selftest` on the CPU backend and every GPU backend in the build (with every
+  multiplication the backend has), on the CUDA backend compiled against
+  `tests/cuda_sim.h`, and on a CPU backend built with the narrow multiplication.
 - `tests/test_cli.py`: end-to-end runs, re-verified in Python.
 
 ## Layout
@@ -389,6 +437,7 @@ make docker-rocm-test   # ROCm and Vulkan in the ROCm container
 ```
 src/kernel/defs.h      target abstraction (CUDA / Metal / CPU)
 src/kernel/field.h     GF(2^255-19)
+src/kernel/field13.h   its multiplication on 24-bit multipliers, written by tools/gen_field13.py
 src/kernel/search.h    the per-thread search loop
 src/kernel/entry_*     per-API kernel entry points (Metal, Vulkan)
 src/backend_*.{cu,mm,cpp}   one per API; backend_cuda.cu is also the ROCm backend

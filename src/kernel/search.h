@@ -194,9 +194,9 @@ CIP_FN void cip_check_product(fe f, fe g, u32 tid, u32 batch, u32 code, cip_para
 // and two probes.
 CIP_FN void cip_pair(u32 i, fe t, fe inv, fe x1, fe y1, u32 q, u32 tid, u32 batch, cip_params prm CIP_BUFS_DECL)
 {
-    fe w = fe_mul(t, inv);
-    fe A = fe_mul(cip_table_load(q + 10u CIP_BUFS), y1);
-    fe B = fe_mul(cip_table_load(q + 20u CIP_BUFS), x1);
+    fe w = fe_mul_t(t, inv);
+    fe A = fe_mul_t(cip_table_load(q + 10u CIP_BUFS), y1);
+    fe B = fe_mul_t(cip_table_load(q + 20u CIP_BUFS), x1);
     u32 code = 2u * (i + 1u);
     cip_check_product(fe_add(A, B), fe_add(inv, w), tid, batch, code, prm CIP_BUFS);
     cip_check_product(fe_sub(A, B), fe_sub(inv, w), tid, batch, code + 1u, prm CIP_BUFS);
@@ -225,7 +225,7 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
         // Forward pass: running product of the denominators, the step's first.
         fe p = fe_carry(fe_one_minus(fe_sq_cold(fe_mul_cold(c, cip_table_load(tab_step CIP_BUFS)))));
         for (u32 i = 0u; i < N; i++) {
-            fe e = fe_mul(cip_table_load(10u * i CIP_BUFS), z);
+            fe e = fe_mul_t(cip_table_load(10u * i CIP_BUFS), z);
             if (smode == CIP_SCRATCH_FULL) {
                 cip_scratch_store(2u * i, tid, T, p CIP_BUFS);
                 cip_scratch_store(2u * i + 1u, tid, T, e CIP_BUFS);
@@ -234,7 +234,7 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
             } else if ((i & 1u) == 0u) {
                 cip_scratch_store(i >> 1, tid, T, p CIP_BUFS);
             }
-            p = fe_mul(p, fe_one_minus(e));
+            p = fe_mul_t(p, fe_one_minus(e));
         }
 
         fe inv_all = fe_invert(p);
@@ -249,10 +249,10 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
                 fe8 mine_p, mine_e;
                 CIP_TAKE(mine_p, ahead_p, 2u * i, 2u * (i > 0u ? i - 1u : 0u));
                 CIP_TAKE(mine_e, ahead_e, 2u * i + 1u, 2u * (i > 0u ? i - 1u : 0u) + 1u);
-                fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
+                fe t = fe_mul_t(cip_table_load(q CIP_BUFS), c);
                 fe d = fe_one_minus(fe_unpack(mine_e));
-                fe inv = fe_mul(inv_all, fe_unpack(mine_p));
-                inv_all = fe_mul(inv_all, d);
+                fe inv = fe_mul_t(inv_all, fe_unpack(mine_p));
+                inv_all = fe_mul_t(inv_all, d);
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else if (smode == CIP_SCRATCH_LEAN) {
@@ -261,9 +261,9 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
                 u32 q = tab_pt + 30u * i;
                 fe8 mine;
                 CIP_TAKE(mine, ahead, i, i > 0u ? i - 1u : 0u);
-                fe t = fe_mul(cip_table_load(q CIP_BUFS), c);
-                fe inv = fe_mul(inv_all, fe_unpack(mine));
-                inv_all = fe_mul(inv_all, fe_one_minus(fe_sq(t)));
+                fe t = fe_mul_t(cip_table_load(q CIP_BUFS), c);
+                fe inv = fe_mul_t(inv_all, fe_unpack(mine));
+                inv_all = fe_mul_t(inv_all, fe_one_minus(fe_sq(t)));
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         } else {
@@ -281,18 +281,18 @@ CIP_FN void cip_search_thread(u32 tid, cip_params prm CIP_BUFS_DECL)
                     fe8 mine;
                     CIP_TAKE(mine, ahead, i >> 1, i > 1u ? (i >> 1) - 1u : 0u);
                     stored = fe_unpack(mine);
-                    t_even = fe_mul(cip_table_load(q - 30u CIP_BUFS), c);
+                    t_even = fe_mul_t(cip_table_load(q - 30u CIP_BUFS), c);
                     d_even = fe_one_minus(fe_sq(t_even));
-                    before = fe_mul(stored, d_even);
-                    t = fe_mul(cip_table_load(q CIP_BUFS), c);
+                    before = fe_mul_t(stored, d_even);
+                    t = fe_mul_t(cip_table_load(q CIP_BUFS), c);
                     d = fe_one_minus(fe_sq(t));
                 } else {
                     t = t_even;
                     d = d_even;
                     before = stored;
                 }
-                fe inv = fe_mul(inv_all, before);
-                inv_all = fe_mul(inv_all, d);
+                fe inv = fe_mul_t(inv_all, before);
+                inv_all = fe_mul_t(inv_all, d);
                 cip_pair(i, t, inv, x1, y1, q, tid, b, prm CIP_BUFS);
             }
         }

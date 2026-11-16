@@ -12,7 +12,7 @@
 #   -DCIP_VULKAN=ON|OFF|AUTO   Vulkan backend (AUTO: if the headers and glslang are found)
 #   -DCIP_CUDA_ARCH=sm_86      GPU generation to compile for instead of the one in this
 #                              machine; `all` for a binary that runs on every NVIDIA GPU
-#   -DCIP_CUDA_AOS=0 -DCIP_VULKAN_AOS=1   scratch layout per backend (see kernel/search.h)
+#   -DCIP_CUDA_AOS=0 -DCIP_VULKAN_AOS=0   scratch layout per backend (see kernel/search.h)
 
 cmake_minimum_required(VERSION 3.21)
 
@@ -20,7 +20,7 @@ set(CIP_CUDA AUTO CACHE STRING "CUDA backend: ON, OFF or AUTO")
 set(CIP_VULKAN AUTO CACHE STRING "Vulkan backend: ON, OFF or AUTO")
 set(CIP_CUDA_ARCH native CACHE STRING "nvcc -arch: native, all, all-major or sm_NN")
 set(CIP_CUDA_AOS 1 CACHE STRING "CUDA scratch layout")
-set(CIP_VULKAN_AOS 0 CACHE STRING "Vulkan scratch layout")
+set(CIP_VULKAN_AOS 1 CACHE STRING "Vulkan scratch layout")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -69,7 +69,7 @@ set(cip_backend_definitions "")
 set(cip_backend_libraries "")
 set(cip_gpu_backends "")
 set(cip_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(cip_kernel src/kernel/defs.h src/kernel/field.h src/kernel/search.h)
+set(cip_kernel src/kernel/defs.h src/kernel/field.h src/kernel/field13.h src/kernel/search.h)
 
 if(CIP_CUDA STREQUAL "AUTO" OR CIP_CUDA)
   # The architecture flag is ours (CIP_CUDA_ARCH), as in the Makefile.
@@ -109,18 +109,25 @@ if(CIP_VULKAN STREQUAL "AUTO" OR CIP_VULKAN)
     HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/glslang" ENV VULKAN_SDK
     PATH_SUFFIXES bin Bin)
   if(cip_vulkan AND CIP_GLSLANG)
-    # The kernel compiled to SPIR-V, one module per scratch mode, embedded as C arrays.
+    # The kernel compiled to SPIR-V and embedded as C arrays: one module per scratch mode
+    # for each field arithmetic (w: wide, n: narrow).
     set(cip_spirv "")
-    foreach(mode 0 1 2)
-      set(spv "${cip_generated}/kernel_vk_${mode}.spv")
-      add_custom_command(OUTPUT "${spv}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${cip_generated}"
-        COMMAND "${CIP_GLSLANG}" -V --target-env vulkan1.1 -DCIP_SMODE=${mode}
-                -DCIP_SCRATCH_AOS=${CIP_VULKAN_AOS} "-I${CMAKE_CURRENT_SOURCE_DIR}/src/kernel"
-                -o "${spv}" "${CMAKE_CURRENT_SOURCE_DIR}/src/kernel/entry_vulkan.comp"
-        DEPENDS src/kernel/entry_vulkan.comp ${cip_kernel}
-        VERBATIM)
-      list(APPEND cip_spirv "${spv}")
+    foreach(arith 0 1)
+      foreach(mode 0 1 2)
+        if(arith)
+          set(spv "${cip_generated}/kernel_vk_n${mode}.spv")
+        else()
+          set(spv "${cip_generated}/kernel_vk_w${mode}.spv")
+        endif()
+        add_custom_command(OUTPUT "${spv}"
+          COMMAND "${CMAKE_COMMAND}" -E make_directory "${cip_generated}"
+          COMMAND "${CIP_GLSLANG}" -V --target-env vulkan1.1 -DCIP_ARITH=${arith} -DCIP_SMODE=${mode}
+                  -DCIP_SCRATCH_AOS=${CIP_VULKAN_AOS} "-I${CMAKE_CURRENT_SOURCE_DIR}/src/kernel"
+                  -o "${spv}" "${CMAKE_CURRENT_SOURCE_DIR}/src/kernel/entry_vulkan.comp"
+          DEPENDS src/kernel/entry_vulkan.comp ${cip_kernel}
+          VERBATIM)
+        list(APPEND cip_spirv "${spv}")
+      endforeach()
     endforeach()
     add_custom_command(OUTPUT "${cip_generated}/kernel_vk.inc"
       COMMAND "${CMAKE_COMMAND}" "-DDIR=${cip_generated}" "-DOUT=${cip_generated}/kernel_vk.inc"
@@ -159,9 +166,13 @@ message(STATUS "cipollino backends: cpu ${cip_summary}")
 enable_testing()
 find_package(Python3 COMPONENTS Interpreter)
 
-# The kernel's field arithmetic behind a C ABI, checked against Python integers.
+# The kernel's field arithmetic behind a C ABI, checked against Python integers: once
+# for each implementation of the multiplication.
 add_library(fieldshim SHARED tests/field_shim.cpp)
 target_include_directories(fieldshim PRIVATE src)
+add_library(fieldshim13 SHARED tests/field_shim.cpp)
+target_include_directories(fieldshim13 PRIVATE src)
+target_compile_definitions(fieldshim13 PRIVATE CIP_ARITH=1)
 
 # The CUDA backend as ordinary C++ on a stand-in for the CUDA runtime, so its host logic
 # and the kernel as CUDA sees it are exercised without a GPU or nvcc.
@@ -171,8 +182,15 @@ set_source_files_properties(tests/sim_backend_cuda.cpp PROPERTIES
   COMPILE_DEFINITIONS "CIP_SCRATCH_AOS=${CIP_CUDA_AOS}")
 target_link_libraries(cipollino-cudasim PRIVATE cipcore)
 
+# The CPU backend running the kernel with the narrow field arithmetic, which otherwise only
+# Vulkan devices see.
+add_executable(cipollino-narrow src/main.cpp src/backend_cpu.cpp)
+target_compile_definitions(cipollino-narrow PRIVATE CIP_ARITH=1)
+target_link_libraries(cipollino-narrow PRIVATE cipcore)
+
 add_test(NAME selftest-cpu COMMAND cipollino --backend cpu --selftest)
 add_test(NAME selftest-cudasim COMMAND cipollino-cudasim --backend cuda --selftest)
+add_test(NAME selftest-narrow COMMAND cipollino-narrow --backend cpu --selftest)
 foreach(backend ${cip_gpu_backends})
   add_test(NAME selftest-${backend} COMMAND cipollino --backend ${backend} --selftest)
   set_tests_properties(selftest-${backend} PROPERTIES LABELS gpu)
@@ -180,6 +198,10 @@ endforeach()
 if(Python3_FOUND)
   set(cip_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests")
   add_test(NAME field COMMAND Python3::Interpreter "${cip_tests}/test_field.py" $<TARGET_FILE:fieldshim>)
+  add_test(NAME field13 COMMAND Python3::Interpreter "${cip_tests}/test_field.py" $<TARGET_FILE:fieldshim13>)
+  add_test(NAME field13-generated
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_field13.py" --check
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/kernel/field13.h")
   add_test(NAME cli-cpu COMMAND Python3::Interpreter "${cip_tests}/test_cli.py" $<TARGET_FILE:cipollino> cpu)
   add_test(NAME cli-cudasim
     COMMAND Python3::Interpreter "${cip_tests}/test_cli.py" $<TARGET_FILE:cipollino-cudasim> cuda)

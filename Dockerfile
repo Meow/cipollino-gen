@@ -32,6 +32,7 @@ WORKDIR /src
 COPY Makefile ./
 COPY src src
 COPY tests tests
+COPY tools tools
 RUN make -j"$(nproc)" CUDA_ARCH="$CUDA_ARCH" \
  && make test-host CUDA_ARCH="$CUDA_ARCH"
 

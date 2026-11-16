@@ -22,6 +22,7 @@ WORKDIR /src
 COPY Makefile ./
 COPY src src
 COPY tests tests
+COPY tools tools
 RUN make -j"$(nproc)" ROCM_ARCH="$ROCM_ARCH" \
  && make test-host ROCM_ARCH="$ROCM_ARCH"
 

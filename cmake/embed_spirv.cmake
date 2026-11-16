@@ -1,8 +1,8 @@
-# Turns kernel_vk_{0,1,2}.spv in DIR into the C arrays the Vulkan backend includes, in the
-# form `xxd -i` gives them (which is what the Makefile uses):
+# Turns kernel_vk_{w,n}{0,1,2}.spv in DIR into the C arrays the Vulkan backend includes, in
+# the form `xxd -i` gives them (which is what the Makefile uses):
 #   cmake -DDIR=<directory> -DOUT=<file> -P embed_spirv.cmake
 set(text "")
-foreach(mode 0 1 2)
+foreach(mode w0 w1 w2 n0 n1 n2)
   file(READ "${DIR}/kernel_vk_${mode}.spv" hex HEX)
   string(LENGTH "${hex}" digits)
   math(EXPR bytes "${digits} / 2")

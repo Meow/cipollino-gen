@@ -112,6 +112,23 @@ CIP_FN fe fe_one_plus(fe b)
     return b;
 }
 
+// The result of fe_mul_probe.
+struct fe_probe {
+    u32 lo;      // low 32 bits of the canonical product, valid if unsure == 0
+    u32 unsure;  // nonzero: lo may be 19 too small
+};
+
+// Multiplication comes in two implementations with one contract. The one below builds
+// 64-bit columns from 32x32 products; field13.h gets by on 24-bit multipliers, for GPUs
+// where the wide ones are slow. fe_mul_t is fe_mul for the operands of the search loop's
+// own products, which field13.h can take as they are: f tight, and g tight or one of
+// fe_one_minus, fe_one_plus of a tight value.
+#if CIP_ARITH == CIP_ARITH_NARROW
+#include "field13.h"
+#else
+
+#define fe_mul_t(f, g) fe_mul((f), (g))
+
 // h = f * g. Term f_i*g_j lands in column (i+j) mod 10, times 19 if it wrapped, times 2
 // if i and j are both odd (two 25-bit limbs overshoot the column offset by one bit).
 CIP_FN fe fe_mul(fe f, fe g)
@@ -168,6 +185,44 @@ CIP_FN fe fe_sq(fe f)
     u64 h9 = CIP_MUL(f0_2, f9) + CIP_MUL(f1_2, f8) + CIP_MUL(f2_2, f7) + CIP_MUL(f3_2, f6) + CIP_MUL(f4_2, f5);
     return fe_reduce(h0, h1, h2, h3, h4, h5, h6, h7, h8, h9);
 }
+
+// The low 32 bits of the canonical value of f*g, for a fraction of the cost of fe_mul.
+//
+// Write the unreduced product as V = sum h_k 2^offset_k. Its canonical value is
+// R + 19*Q with R = V mod 2^255 and Q = floor(V / 2^255) (plus one more 19 with
+// probability 2^-200, ignored as in fe_low32). The low 32 bits of R depend only on the
+// low bits of columns 0 and 1, which plain wrapping 32-bit multiplies give exactly, and
+// Q = floor((h9 + h8/2^26 + h7/2^51 + ...) / 2^25) is determined by columns 8 and 9
+// alone unless the dropped terms (less than 2^12 + 2 in total) can carry across a
+// multiple of 2^25. That case is reported as `unsure` (about one product in 4000) and
+// the caller falls back to fe_mul. So a candidate costs 20 wide and 20 narrow
+// multiplications and no carry chain, instead of 100 wide ones and a full reduction.
+CIP_FN fe_probe fe_mul_probe(fe f, fe g)
+{
+    u32 f0 = f.v[0], f1 = f.v[1], f2 = f.v[2], f3 = f.v[3], f4 = f.v[4];
+    u32 f5 = f.v[5], f6 = f.v[6], f7 = f.v[7], f8 = f.v[8], f9 = f.v[9];
+    u32 g0 = g.v[0], g1 = g.v[1], g2 = g.v[2], g3 = g.v[3], g4 = g.v[4];
+    u32 g5 = g.v[5], g6 = g.v[6], g7 = g.v[7], g8 = g.v[8], g9 = g.v[9];
+    u32 g1_19 = 19u * g1, g2_19 = 19u * g2, g3_19 = 19u * g3, g4_19 = 19u * g4, g5_19 = 19u * g5;
+    u32 g6_19 = 19u * g6, g7_19 = 19u * g7, g8_19 = 19u * g8, g9_19 = 19u * g9;
+    u32 f1_2 = 2u * f1, f3_2 = 2u * f3, f5_2 = 2u * f5, f7_2 = 2u * f7, f9_2 = 2u * f9;
+
+    u32 l0 = f0 * g0 + f1_2 * g9_19 + f2 * g8_19 + f3_2 * g7_19 + f4 * g6_19
+           + f5_2 * g5_19 + f6 * g4_19 + f7_2 * g3_19 + f8 * g2_19 + f9_2 * g1_19;
+    u32 l1 = f0 * g1 + f1 * g0 + f2 * g9_19 + f3 * g8_19 + f4 * g7_19
+           + f5 * g6_19 + f6 * g5_19 + f7 * g4_19 + f8 * g3_19 + f9 * g2_19;
+    u64 h8 = CIP_MUL(f0, g8) + CIP_MUL(f1_2, g7) + CIP_MUL(f2, g6) + CIP_MUL(f3_2, g5) + CIP_MUL(f4, g4)
+           + CIP_MUL(f5_2, g3) + CIP_MUL(f6, g2) + CIP_MUL(f7_2, g1) + CIP_MUL(f8, g0) + CIP_MUL(f9_2, g9_19);
+    u64 h9 = CIP_MUL(f0, g9) + CIP_MUL(f1, g8) + CIP_MUL(f2, g7) + CIP_MUL(f3, g6) + CIP_MUL(f4, g5)
+           + CIP_MUL(f5, g4) + CIP_MUL(f6, g3) + CIP_MUL(f7, g2) + CIP_MUL(f8, g1) + CIP_MUL(f9, g0);
+    u64 n = h9 + (h8 >> 26);
+    fe_probe r;
+    r.lo = l0 + (l1 << 26) + 19u * CIP_U32(n >> 25);
+    r.unsure = ((CIP_U32(n) & CIP_M25) >= CIP_M25 - 8192u) ? 1u : 0u;
+    return r;
+}
+
+#endif  // CIP_ARITH
 
 // Out-of-line copies for code that runs once per batch rather than once per pair.
 CIP_COLD_FN fe fe_mul_cold(fe f, fe g) { return fe_mul(f, g); }
@@ -258,45 +313,4 @@ CIP_FN u32 fe_high32(fe a)
 {
     u64 lo = CIP_U64(a.v[0]) + (CIP_U64(a.v[1]) << 26) + (CIP_U64(a.v[2]) << 51) + CIP_U64(19u * (a.v[9] >> 25));
     return CIP_U32(lo >> 32);
-}
-
-// The low 32 bits of the canonical value of f*g, for a fraction of the cost of fe_mul.
-//
-// Write the unreduced product as V = sum h_k 2^offset_k. Its canonical value is
-// R + 19*Q with R = V mod 2^255 and Q = floor(V / 2^255) (plus one more 19 with
-// probability 2^-200, ignored as in fe_low32). The low 32 bits of R depend only on the
-// low bits of columns 0 and 1, which plain wrapping 32-bit multiplies give exactly, and
-// Q = floor((h9 + h8/2^26 + h7/2^51 + ...) / 2^25) is determined by columns 8 and 9
-// alone unless the dropped terms (less than 2^12 + 2 in total) can carry across a
-// multiple of 2^25. That case is reported as `unsure` (about one product in 4000) and
-// the caller falls back to fe_mul. So a candidate costs 20 wide and 20 narrow
-// multiplications and no carry chain, instead of 100 wide ones and a full reduction.
-struct fe_probe {
-    u32 lo;      // low 32 bits of the canonical product, valid if unsure == 0
-    u32 unsure;  // nonzero: lo may be 19 too small
-};
-
-CIP_FN fe_probe fe_mul_probe(fe f, fe g)
-{
-    u32 f0 = f.v[0], f1 = f.v[1], f2 = f.v[2], f3 = f.v[3], f4 = f.v[4];
-    u32 f5 = f.v[5], f6 = f.v[6], f7 = f.v[7], f8 = f.v[8], f9 = f.v[9];
-    u32 g0 = g.v[0], g1 = g.v[1], g2 = g.v[2], g3 = g.v[3], g4 = g.v[4];
-    u32 g5 = g.v[5], g6 = g.v[6], g7 = g.v[7], g8 = g.v[8], g9 = g.v[9];
-    u32 g1_19 = 19u * g1, g2_19 = 19u * g2, g3_19 = 19u * g3, g4_19 = 19u * g4, g5_19 = 19u * g5;
-    u32 g6_19 = 19u * g6, g7_19 = 19u * g7, g8_19 = 19u * g8, g9_19 = 19u * g9;
-    u32 f1_2 = 2u * f1, f3_2 = 2u * f3, f5_2 = 2u * f5, f7_2 = 2u * f7, f9_2 = 2u * f9;
-
-    u32 l0 = f0 * g0 + f1_2 * g9_19 + f2 * g8_19 + f3_2 * g7_19 + f4 * g6_19
-           + f5_2 * g5_19 + f6 * g4_19 + f7_2 * g3_19 + f8 * g2_19 + f9_2 * g1_19;
-    u32 l1 = f0 * g1 + f1 * g0 + f2 * g9_19 + f3 * g8_19 + f4 * g7_19
-           + f5 * g6_19 + f6 * g5_19 + f7 * g4_19 + f8 * g3_19 + f9 * g2_19;
-    u64 h8 = CIP_MUL(f0, g8) + CIP_MUL(f1_2, g7) + CIP_MUL(f2, g6) + CIP_MUL(f3_2, g5) + CIP_MUL(f4, g4)
-           + CIP_MUL(f5_2, g3) + CIP_MUL(f6, g2) + CIP_MUL(f7_2, g1) + CIP_MUL(f8, g0) + CIP_MUL(f9_2, g9_19);
-    u64 h9 = CIP_MUL(f0, g9) + CIP_MUL(f1, g8) + CIP_MUL(f2, g7) + CIP_MUL(f3, g6) + CIP_MUL(f4, g5)
-           + CIP_MUL(f5, g4) + CIP_MUL(f6, g3) + CIP_MUL(f7, g2) + CIP_MUL(f8, g1) + CIP_MUL(f9, g0);
-    u64 n = h9 + (h8 >> 26);
-    fe_probe r;
-    r.lo = l0 + (l1 << 26) + 19u * CIP_U32(n >> 25);
-    r.unsure = ((CIP_U32(n) & CIP_M25) >= CIP_M25 - 8192u) ? 1u : 0u;
-    return r;
 }

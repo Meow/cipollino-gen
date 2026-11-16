@@ -43,7 +43,7 @@
 #define CIP_TARGET_CPU
 #include "kernel/defs.h"
 
-#include "kernel_vk.inc"  // kernel_vk_{0,1,2}_spv[] and their _len, indexed by CIP_SCRATCH_*
+#include "kernel_vk.inc"  // kernel_vk_{w,n}{0,1,2}_spv[] and their _len: arithmetic, CIP_SCRATCH_*
 
 namespace {
 
@@ -178,6 +178,15 @@ public:
         return apple() ? 65536 : 16384;
     }
 
+    // Integrated GPUs come two compute units wide and sixteen, and the small ones lose a
+    // third of their speed when given the threads (and with them the scratch memory) of
+    // the large ones: measured on a 2-unit Radeon 610M, which is fastest at 1024 to 2048.
+    std::vector<uint32_t> thread_candidates() const override
+    {
+        if (props_.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU || apple()) return {suggested_threads()};
+        return {1024, 2048, 4096, 8192, 16384};
+    }
+
     uint32_t suggested_pairs() const override
     {
         if (nvidia()) return 512;  // short batches, see suggested_launch_seconds()
@@ -212,18 +221,37 @@ public:
         return props_.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 0.25 : 0.1;
     }
 
+    // A 32x32 multiply costs an AMD GPU 4.5 additions and a 24-bit one a single addition
+    // (measured on RDNA 2), and Mesa's compiler spends two of the former on every 64-bit
+    // product: the narrow arithmetic is 1.6 times as fast there. AMD's own drivers have a
+    // different compiler, so both are measured. An Apple M5 Pro runs the narrow one at 0.42
+    // of the speed. On NVIDIA it has not been run: by the instruction costs measured on an
+    // RTX 4090 its 400 multiplies need twice the energy of the 100 wide ones. Nothing else
+    // has been tried, so there both are measured as well.
+    std::vector<uint32_t> arith_candidates() const override
+    {
+        if (amd()) return {CIP_ARITH_NARROW, CIP_ARITH_WIDE};
+        if (nvidia() || apple()) return {CIP_ARITH_WIDE};
+        return {CIP_ARITH_WIDE, CIP_ARITH_NARROW};
+    }
+
+    void set_arith(uint32_t arith) override
+    {
+        if (arith > CIP_ARITH_NARROW) throw std::runtime_error("bad field arithmetic");
+        arith_ = arith;
+    }
+
     void configure(uint32_t nthreads, uint32_t npairs, uint32_t smode, const std::vector<uint32_t> &table) override
     {
         if (smode > CIP_SCRATCH_FULL) throw std::runtime_error("bad scratch mode");
         uint64_t scratch = scratch_bytes(nthreads, npairs, smode);
         if (scratch > max_buffer_bytes())
             throw std::runtime_error("scratch buffer exceeds what this Vulkan device allows in one buffer; lower --threads or --pairs");
-        pipeline(smode);  // compile before allocating anything
+        active_ = pipeline(arith_, smode);  // compile before allocating anything
         prm_ = cip_params();
         prm_.nthreads = nthreads;
         prm_.npairs = npairs;
         prm_.hitcap = kHitCap;
-        smode_ = smode;
         free_buffer(state_);
         free_buffer(table_);
         free_buffer(scratch_);
@@ -269,7 +297,7 @@ public:
         *(uint32_t *)hitctr_.map = 0;
 
         begin();
-        vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline(smode_));
+        vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, active_);
         vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &dset_, 0, nullptr);
         vkCmdPushConstants(cmd_, layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof prm_, &prm_);
         vkCmdDispatch(cmd_, (prm_.nthreads + kLocalSize - 1) / kLocalSize, 1, 1);
@@ -291,6 +319,7 @@ private:
     };
 
     bool apple() const { return props_.vendorID == 0x106b; }
+    bool amd() const { return props_.vendorID == 0x1002; }
     bool nvidia() const { return props_.vendorID == 0x10de; }
 
     uint64_t max_buffer_bytes() const
@@ -399,31 +428,35 @@ private:
         check(vkAllocateDescriptorSets(dev_, &da, &dset_), "vkAllocateDescriptorSets");
     }
 
-    // The compute pipeline for a scratch mode, built (and compiled by the driver) on first use.
-    VkPipeline pipeline(uint32_t smode)
+    // The compute pipeline for a field arithmetic and scratch mode, built (and compiled by
+    // the driver) on first use.
+    VkPipeline pipeline(uint32_t arith, uint32_t smode)
     {
-        if (pipelines_[smode]) return pipelines_[smode];
-        static const unsigned char *const code[3] = {kernel_vk_0_spv, kernel_vk_1_spv, kernel_vk_2_spv};
-        const unsigned len[3] = {kernel_vk_0_spv_len, kernel_vk_1_spv_len, kernel_vk_2_spv_len};
-        std::vector<uint32_t> words(len[smode] / 4);  // SPIR-V must be handed over 4-byte aligned
-        memcpy(words.data(), code[smode], words.size() * 4);
+        const uint32_t at = 3 * arith + smode;
+        if (pipelines_[at]) return pipelines_[at];
+        static const unsigned char *const code[kModules] = {kernel_vk_w0_spv, kernel_vk_w1_spv, kernel_vk_w2_spv,
+                                                            kernel_vk_n0_spv, kernel_vk_n1_spv, kernel_vk_n2_spv};
+        const unsigned len[kModules] = {kernel_vk_w0_spv_len, kernel_vk_w1_spv_len, kernel_vk_w2_spv_len,
+                                        kernel_vk_n0_spv_len, kernel_vk_n1_spv_len, kernel_vk_n2_spv_len};
+        std::vector<uint32_t> words(len[at] / 4);  // SPIR-V must be handed over 4-byte aligned
+        memcpy(words.data(), code[at], words.size() * 4);
 
         VkShaderModuleCreateInfo mi = {};
         mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         mi.codeSize = words.size() * 4;
         mi.pCode = words.data();
-        check(vkCreateShaderModule(dev_, &mi, nullptr, &modules_[smode]), "vkCreateShaderModule");
+        check(vkCreateShaderModule(dev_, &mi, nullptr, &modules_[at]), "vkCreateShaderModule");
 
         VkComputePipelineCreateInfo ci = {};
         ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
         ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        ci.stage.module = modules_[smode];
+        ci.stage.module = modules_[at];
         ci.stage.pName = "main";
         ci.layout = layout_;
-        check(vkCreateComputePipelines(dev_, VK_NULL_HANDLE, 1, &ci, nullptr, &pipelines_[smode]),
+        check(vkCreateComputePipelines(dev_, VK_NULL_HANDLE, 1, &ci, nullptr, &pipelines_[at]),
               "compiling the kernel (vkCreateComputePipelines)");
-        return pipelines_[smode];
+        return pipelines_[at];
     }
 
     uint32_t memory_type(uint32_t allowed, bool host) const
@@ -565,6 +598,7 @@ private:
     }
 
     static constexpr uint32_t kBindings = 7;  // state, table, scratch, hitctr, hits, filt, bitmap
+    static constexpr uint32_t kModules = 6;   // field arithmetics times scratch modes
 
     std::shared_ptr<Instance> instance_;  // must outlive the device
     VkPhysicalDevice phys_;
@@ -581,10 +615,11 @@ private:
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkDescriptorPool dpool_ = VK_NULL_HANDLE;
     VkDescriptorSet dset_ = VK_NULL_HANDLE;
-    VkShaderModule modules_[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VkPipeline pipelines_[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VkShaderModule modules_[kModules] = {};
+    VkPipeline pipelines_[kModules] = {};
+    VkPipeline active_ = VK_NULL_HANDLE;  // the one configure() chose
     Buffer state_, table_, scratch_, hitctr_, hits_, filt_, bitmap_;
-    uint32_t smode_ = CIP_SCRATCH_LEAN;
+    uint32_t arith_ = CIP_ARITH_WIDE;
     cip_params prm_ = cip_params();
 };
 

@@ -19,11 +19,13 @@
 // to live in one binary.
 #if defined(CIP_ROCM)
 #define CIP_THREADS_PER_UNIT 1024
+#define CIP_PAIRS 512
 #define CIP_API "ROCm"
 #define CIP_KERNEL cip_kernel_rocm
 #define CIP_CREATE create_rocm_backends
 #else
 #define CIP_THREADS_PER_UNIT 2048
+#define CIP_PAIRS 1024
 #define CIP_API "CUDA"
 #define CIP_KERNEL cip_kernel_cuda
 #define CIP_CREATE create_cuda_backends
@@ -92,13 +94,21 @@ public:
         return std::min<uint64_t>(free_bytes / 2, (uint64_t)6 << 30);
     }
 
-    // Batches past 512 pairs gain nothing measurable (the inversion is already under 3%).
-    uint32_t suggested_pairs() const override { return 1024; }
+    // Batches past 512 pairs gain nothing measurable (the inversion is already under 3%),
+    // and the AMD iGPU loses 6% at 1024 against 384 to 512.
+    uint32_t suggested_pairs() const override { return CIP_PAIRS; }
 
     // Fast cards can outrun their memory bandwidth, slow ones cannot: measure.
     std::vector<uint32_t> scratch_candidates() const override
     {
         return {CIP_SCRATCH_LEAN, CIP_SCRATCH_HALF, CIP_SCRATCH_FULL};
+    }
+
+    // One kernel, with the field arithmetic this file was compiled for (CIP_ARITH).
+    std::vector<uint32_t> arith_candidates() const override { return {CIP_ARITH}; }
+    void set_arith(uint32_t arith) override
+    {
+        if (arith != CIP_ARITH) throw std::runtime_error(describe() + ": not built with that field arithmetic");
     }
 
     void configure(uint32_t nthreads, uint32_t npairs, uint32_t smode, const std::vector<uint32_t> &table) override
