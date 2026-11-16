@@ -181,6 +181,11 @@ depends on it.
 
 Every extra character multiplies the work by 32:
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/wait-dark.svg">
+  <img src="docs/wait-light.svg" width="760" alt="Average wait for one key by prefix length on an M5 Pro and an RTX 4090, with the band between the waits that 50% and 95% of searches stay under. The table below has the averages.">
+</picture>
+
 | prefix length | keys to test (average) | at 1.5 G keys/s (M5 Pro) | at 16.5 G keys/s (RTX 4090) |
 |---|---|---|---|
 | 6 | 1.1e9 | 0.7 s | instant |
@@ -206,6 +211,11 @@ not been measured since the filter was reworked (see Tuning).
 
 Measured with `cipollino --bench`:
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/speed-dark.svg">
+  <img src="docs/speed-light.svg" width="760" alt="Keys tested per second by device and API on a logarithmic axis; the table below has the same numbers.">
+</picture>
+
 | device | backend | keys/s |
 |---|---|---|
 | NVIDIA RTX 4090 | CUDA | 16.6 G |
@@ -230,6 +240,11 @@ times an add (0.040 nJ against 0.013), and a byte of scratch traffic to memory a
 much as three multiply-adds (0.13 nJ). Of the roughly 55 nJ a pair of keys costs, about 38
 are its ~950 wide multiplies, 12 the other 850 instructions and 5 to 8 the scratch
 traffic.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/energy-dark.svg">
+  <img src="docs/energy-light.svg" width="760" alt="One bar of 55 nanojoules per key pair: 38 for wide multiply-adds, 12 for other instructions, 5 to 8 for scratch memory traffic.">
+</picture>
 
 That is why the obvious things do little there. With the scratch traffic removed
 altogether (not a working configuration) the kernel reaches 17.7 G keys/s, which is the
@@ -263,6 +278,11 @@ your own risk.
 On NVIDIA the Vulkan kernel is as fast as the CUDA one. On the Radeon 610M it ran at 43 M
 keys/s against ROCm's 96 M. Three things were behind that, found with loops of single
 instructions on that GPU; with them fixed Vulkan reaches 90 M and ROCm 105 M.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/amd-dark.svg">
+  <img src="docs/amd-light.svg" width="760" alt="Radeon 610M, million keys per second before and after: Vulkan from 43 to 90, ROCm from 96 to 105.">
+</picture>
 
 - **Multiplies.** On this GPU (RDNA 2) a 32x32 multiply, either half of the product,
   takes as long as 4.5 additions; a multiply of two values below 2^24 takes as long as
@@ -475,4 +495,9 @@ src/filter.cpp         prefixes -> GPU filter tables
 src/onion.cpp          SHA3-256, address encoding
 Dockerfile, Dockerfile.rocm, docker/, cipollino-docker    container builds, entry-point guard, run wrapper
 CMakeLists.txt, cmake/, vcpkg.json    the Windows build
+docs/, tools/gen_charts.py    this file's charts and the script that draws them
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).

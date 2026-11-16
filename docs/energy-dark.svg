@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="176" viewBox="0 0 760 176" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' role="img" aria-label="Energy per key pair on an RTX 4090 by where it goes">
+<rect x="0.5" y="0.5" width="759.0" height="175.0" rx="10" fill="#1a1a19" stroke="rgba(255,255,255,0.10)"/>
+<text x="28.0" y="34.0" font-size="15" font-weight="600" text-anchor="start" fill="#f0efec">Where a key pair's energy goes on an RTX 4090</text>
+<text x="28.0" y="54.0" font-size="12" font-weight="400" text-anchor="start" fill="#c3c2b7">About 55 nanojoules per pair at the card's 450 W limit.</text>
+<rect x="28.0" y="78.0" width="484.4" height="24.0" rx="0" fill="#3987e5"/>
+<rect x="514.4" y="78.0" width="151.6" height="24.0" rx="0" fill="#d95926"/>
+<path d="M668.0,78 H728.0 Q732.0,78 732.0,82 V98 Q732.0,102 728.0,102 H668.0 Z" fill="#199e70"/>
+<rect x="28.0" y="122.0" width="10.0" height="10.0" rx="2" fill="#3987e5"/>
+<text x="44.0" y="131.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">38 nJ</text>
+<text x="44.0" y="148.0" font-size="12" font-weight="400" text-anchor="start" fill="#c3c2b7">950 wide multiply-adds</text>
+<rect x="264.0" y="122.0" width="10.0" height="10.0" rx="2" fill="#d95926"/>
+<text x="280.0" y="131.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">12 nJ</text>
+<text x="280.0" y="148.0" font-size="12" font-weight="400" text-anchor="start" fill="#c3c2b7">850 other instructions</text>
+<rect x="500.0" y="122.0" width="10.0" height="10.0" rx="2" fill="#199e70"/>
+<text x="516.0" y="131.0" font-size="12" font-weight="600" text-anchor="start" fill="#f0efec">5 to 8 nJ</text>
+<text x="516.0" y="148.0" font-size="12" font-weight="400" text-anchor="start" fill="#c3c2b7">scratch memory traffic</text>
+</svg>

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="412" viewBox="0 0 760 412" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' role="img" aria-label="Average wait for one key by prefix length, for two GPUs">
+<rect x="0.5" y="0.5" width="759.0" height="411.0" rx="10" fill="#fcfcfb" stroke="rgba(11,11,11,0.10)"/>
+<text x="28.0" y="34.0" font-size="15" font-weight="600" text-anchor="start" fill="#0b0b0b">How long a prefix takes</text>
+<text x="28.0" y="54.0" font-size="12" font-weight="400" text-anchor="start" fill="#52514e">Lines: the average wait for one key. Bands: half of all searches end below the band, 95% below its top.</text>
+<line x1="92.0" y1="315.8" x2="620.0" y2="315.8" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="319.8" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 second</text>
+<line x1="92.0" y1="275.6" x2="620.0" y2="275.6" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="279.6" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 minute</text>
+<line x1="92.0" y1="235.4" x2="620.0" y2="235.4" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="239.4" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 hour</text>
+<line x1="92.0" y1="204.2" x2="620.0" y2="204.2" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="208.2" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 day</text>
+<line x1="92.0" y1="170.8" x2="620.0" y2="170.8" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="174.8" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 month</text>
+<line x1="92.0" y1="146.3" x2="620.0" y2="146.3" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="150.3" font-size="11" font-weight="400" text-anchor="end" fill="#898781">1 year</text>
+<line x1="92.0" y1="101.1" x2="620.0" y2="101.1" stroke="#e1e0d9" stroke-width="1" stroke-linecap="round"/>
+<text x="82.0" y="105.1" font-size="11" font-weight="400" text-anchor="end" fill="#898781">100 years</text>
+<text x="92.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">6</text>
+<text x="180.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">7</text>
+<text x="268.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">8</text>
+<text x="356.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">9</text>
+<text x="444.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">10</text>
+<text x="532.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">11</text>
+<text x="620.0" y="372.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">12</text>
+<text x="356.0" y="392.0" font-size="11" font-weight="400" text-anchor="middle" fill="#898781">prefix length, characters</text>
+<line x1="28.0" y1="72.0" x2="46.0" y2="72.0" stroke="#2a78d6" stroke-width="2" stroke-linecap="round"/>
+<circle cx="37.0" cy="72.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="54.0" y="76.0" font-size="12" font-weight="400" text-anchor="start" fill="#52514e">Apple M5 Pro, 1.5 G keys/s</text>
+<line x1="248.4" y1="72.0" x2="266.4" y2="72.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="257.4" cy="72.0" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="274.4" y="76.0" font-size="12" font-weight="400" text-anchor="start" fill="#52514e">NVIDIA RTX 4090, 16.5 G keys/s</text>
+<path d="M92.0,308.3 L180.0,274.3 L268.0,240.3 L356.0,206.2 L444.0,172.2 L532.0,138.2 L620.0,104.2 L620.0,118.5 L532.0,152.6 L444.0,186.6 L356.0,220.6 L268.0,254.6 L180.0,288.7 L92.0,322.7Z" fill="#2a78d6" fill-opacity="0.1"/>
+<path d="M92.0,319.1 L180.0,285.1 L268.0,251.0 L356.0,217.0 L444.0,183.0 L532.0,149.0 L620.0,114.9" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="92.0" cy="319.1" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="180.0" cy="285.1" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="268.0" cy="251.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="356.0" cy="217.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="444.0" cy="183.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="532.0" cy="149.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="620.0" cy="114.9" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="634.0" y="118.9" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">24 years</text>
+<path d="M92.0,331.9 L180.0,297.9 L268.0,263.8 L356.0,229.8 L444.0,195.8 L532.0,161.7 L620.0,127.7 L620.0,142.1 L532.0,176.1 L444.0,210.1 L356.0,244.2 L268.0,278.2 L180.0,312.2 L92.0,346.3Z" fill="#eb6834" fill-opacity="0.1"/>
+<path d="M92.0,342.7 L180.0,308.6 L268.0,274.6 L356.0,240.6 L444.0,206.5 L532.0,172.5 L620.0,138.5" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="92.0" cy="342.7" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="180.0" cy="308.6" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="268.0" cy="274.6" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="356.0" cy="240.6" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="444.0" cy="206.5" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="532.0" cy="172.5" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="620.0" cy="138.5" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="634.0" y="142.5" font-size="12" font-weight="600" text-anchor="start" fill="#0b0b0b">2.2 years</text>
+</svg>
