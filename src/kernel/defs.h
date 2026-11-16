@@ -32,11 +32,11 @@ typedef uint u32;
 typedef ulong u64;
 typedef int i32;
 typedef long i64;
-#define CIP_FN static inline __attribute__((always_inline))
-#define CIP_COLD_FN static inline
-#define CIP_GPTR(T) device T *
-#define CIP_CPTR(T) const device T *
-#define CIP_HITCTR device atomic_uint *
+#define CIP_FN            static inline __attribute__((always_inline))
+#define CIP_COLD_FN       static inline
+#define CIP_GPTR(T)       device T *
+#define CIP_CPTR(T)       const device T *
+#define CIP_HITCTR        device atomic_uint *
 #define CIP_ATOMIC_INC(p) atomic_fetch_add_explicit((p), 1u, memory_order_relaxed)
 
 #elif defined(CIP_TARGET_CUDA)
@@ -58,9 +58,9 @@ typedef int64_t i64;
 #else
 #define CIP_COLD_FN static __device__ __attribute__((noinline))
 #endif
-#define CIP_GPTR(T) T *
-#define CIP_CPTR(T) const T *
-#define CIP_HITCTR u32 *
+#define CIP_GPTR(T)       T *
+#define CIP_CPTR(T)       const T *
+#define CIP_HITCTR        u32 *
 #define CIP_ATOMIC_INC(p) atomicAdd((p), 1u)
 
 #if defined(__NVCC__)
@@ -69,12 +69,12 @@ typedef int64_t i64;
 // is then a 64x64 multiply as far as ptxas can tell, and every one of them drags along an
 // add of the (zero) high word: 92 dead instructions per pair in the forward pass alone,
 // and 10% of the throughput of an RTX 4090.
-static __device__ __forceinline__ u64 cip_mul_wide(u32 a, u32 b)
-{
-    u64 r;
-    asm("mul.wide.u32 %0, %1, %2;" : "=l"(r) : "r"(a), "r"(b));
-    return r;
+static __device__ __forceinline__ u64 cip_mul_wide(u32 a, u32 b) {
+  u64 r;
+  asm("mul.wide.u32 %0, %1, %2;" : "=l"(r) : "r"(a), "r"(b));
+  return r;
 }
+
 #define CIP_MUL(a, b) cip_mul_wide((a), (b))
 #endif
 
@@ -85,11 +85,11 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int32_t i32;
 typedef int64_t i64;
-#define CIP_FN static inline
+#define CIP_FN      static inline
 #define CIP_COLD_FN static inline
 #define CIP_GPTR(T) T *
 #define CIP_CPTR(T) const T *
-#define CIP_HITCTR u32 *
+#define CIP_HITCTR  u32 *
 #if defined(_MSC_VER)
 #include <intrin.h>
 #define CIP_ATOMIC_INC(p) ((u32)_InterlockedExchangeAdd((volatile long *)(p), 1))
@@ -131,14 +131,13 @@ typedef int64_t i64;
 #else
 #define CIP_UNUSED [[maybe_unused]]
 #endif
-#define CIP_BUFS_DECL                                                                          \
-    , CIP_UNUSED CIP_GPTR(u32) state, CIP_UNUSED CIP_CPTR(u32) table,                          \
-        CIP_UNUSED CIP_GPTR(u32) scratch, CIP_UNUSED CIP_HITCTR hitctr,                        \
-        CIP_UNUSED CIP_GPTR(u32) hits, CIP_UNUSED CIP_CPTR(u32) filt,                          \
-        CIP_UNUSED CIP_CPTR(u32) bitmap
-#define CIP_BUFS , state, table, scratch, hitctr, hits, filt, bitmap
-#define CIP_HIT_NEXT() CIP_ATOMIC_INC(hitctr)
-#define CIP_SMODE_TEMPLATE template <int SMODE>
+#define CIP_BUFS_DECL                                                                                 \
+  , CIP_UNUSED CIP_GPTR(u32) state, CIP_UNUSED CIP_CPTR(u32) table, CIP_UNUSED CIP_GPTR(u32) scratch, \
+    CIP_UNUSED CIP_HITCTR hitctr, CIP_UNUSED CIP_GPTR(u32) hits, CIP_UNUSED CIP_CPTR(u32) filt,       \
+    CIP_UNUSED CIP_CPTR(u32) bitmap
+#define CIP_BUFS           , state, table, scratch, hitctr, hits, filt, bitmap
+#define CIP_HIT_NEXT()     CIP_ATOMIC_INC(hitctr)
+#define CIP_SMODE_TEMPLATE template<int SMODE>
 #endif
 
 // ---- layout constants shared by the host and the kernel -----------------------------
@@ -175,24 +174,24 @@ typedef int64_t i64;
 // Field multiplication (see field.h): on 32x32->64 products, or on 24-bit multipliers
 // (field13.h). Which is faster is a property of the GPU and of its compiler; the backends
 // that can know say so in arith_candidates().
-#define CIP_ARITH_WIDE 0
+#define CIP_ARITH_WIDE   0
 #define CIP_ARITH_NARROW 1
 #ifndef CIP_ARITH
 #define CIP_ARITH CIP_ARITH_WIDE
 #endif
 
-#define CIP_STATE_WORDS 20u  // per thread: both coordinates of its centre, 10 limbs each
-#define CIP_HIT_WORDS 3u
+#define CIP_STATE_WORDS 20u // per thread: both coordinates of its centre, 10 limbs each
+#define CIP_HIT_WORDS   3u
 
 // The pre-filter on the first 32 bits of a key, by number of prefixes:
 //   DIRECT       up to CIP_FEW_DIRECT: mask-and-compare against launch parameters
 //   DIRECT_MANY  up to CIP_MAX_DIRECT: the same with all twelve slots, about 2% of a
 //                pair's instructions and still no memory access
 //   BITMAP       any number: bit tables, see below
-#define CIP_FEW_DIRECT 4u
-#define CIP_MAX_DIRECT 12u
-#define CIP_MODE_DIRECT 0u
-#define CIP_MODE_BITMAP 1u
+#define CIP_FEW_DIRECT       4u
+#define CIP_MAX_DIRECT       12u
+#define CIP_MODE_DIRECT      0u
+#define CIP_MODE_BITMAP      1u
 #define CIP_MODE_DIRECT_MANY 2u
 
 // Bitmap mode keeps three bit tables in one buffer. Every key is looked up in the near
@@ -200,21 +199,21 @@ typedef int64_t i64;
 // table of megabytes costs a trip to memory per key. The keys that pass it (one in
 // 65536 per prefix) are looked up in the two far tables, on bits 0-23 and on bits 8-31.
 #define CIP_BITMAP_NEAR_BITS 16u
-#define CIP_BITMAP_FAR_BITS 24u
-#define CIP_BITMAP_FAR_A (1u << (CIP_BITMAP_NEAR_BITS - 5u))  // word offsets in the buffer
-#define CIP_BITMAP_FAR_B (CIP_BITMAP_FAR_A + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
-#define CIP_BITMAP_WORDS (CIP_BITMAP_FAR_B + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
+#define CIP_BITMAP_FAR_BITS  24u
+#define CIP_BITMAP_FAR_A     (1u << (CIP_BITMAP_NEAR_BITS - 5u)) // word offsets in the buffer
+#define CIP_BITMAP_FAR_B     (CIP_BITMAP_FAR_A + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
+#define CIP_BITMAP_WORDS     (CIP_BITMAP_FAR_B + (1u << (CIP_BITMAP_FAR_BITS - 5u)))
 
 // Launch parameters. Plain u32s only so the layout is identical everywhere.
 struct cip_params {
-    u32 nthreads;  // kernel threads T
-    u32 npairs;    // pairs per batch N: each batch tests 2N+1 keys per thread
-    u32 nbatches;  // batches per launch
-    u32 nfilt;     // number of filter records in the filter buffer
-    u32 mode;      // CIP_MODE_*
-    u32 hitcap;    // capacity of the hit buffer, in records
-    u32 first;     // the launch runs the threads first .. first + count - 1 and leaves
-    u32 count;     // every other thread's state alone
-    u32 dm[12];    // direct modes: low-32 masks (unused entries: mask 0 / value 1, never match)
-    u32 dv[12];    // direct modes: low-32 values
+  u32 nthreads; // kernel threads T
+  u32 npairs;   // pairs per batch N: each batch tests 2N+1 keys per thread
+  u32 nbatches; // batches per launch
+  u32 nfilt;    // number of filter records in the filter buffer
+  u32 mode;     // CIP_MODE_*
+  u32 hitcap;   // capacity of the hit buffer, in records
+  u32 first;    // the launch runs the threads first .. first + count - 1 and leaves
+  u32 count;    // every other thread's state alone
+  u32 dm[12];   // direct modes: low-32 masks (unused entries: mask 0 / value 1, never match)
+  u32 dv[12];   // direct modes: low-32 values
 };

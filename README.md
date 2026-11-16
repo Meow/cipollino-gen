@@ -368,6 +368,8 @@ make docker-rocm-test   # ROCm and Vulkan
   independent pure-Python Ed25519 verifies, and `--verify` against intact and damaged key
   directories.
 
+The C++ sources follow [`.clang-format`](.clang-format); `make format` applies it.
+
 ## Versions
 
 The version is the content of [`VERSION`](VERSION) and what `cipollino --version` prints;

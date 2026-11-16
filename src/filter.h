@@ -6,17 +6,18 @@
 #include <vector>
 
 struct Filter {
-    std::vector<uint32_t> records;   // 4 words per prefix: mask_lo, value_lo, mask_hi, value_hi
-    std::vector<uint32_t> bitmap;    // bitmap mode only: CIP_BITMAP_WORDS words
-    double density = 0;              // share of all keys the kernel reports (an upper bound)
-    uint32_t dm[12];                 // direct modes: pre-filter on the low 32 bits, as in
-    uint32_t dv[12];                 // cip_params (an unused entry never matches)
-    uint32_t mode = 0;               // CIP_MODE_*
-    Filter();
-    uint32_t count() const { return (uint32_t)(records.size() / 4); }
+  std::vector<uint32_t> records; // 4 words per prefix: mask_lo, value_lo, mask_hi, value_hi
+  std::vector<uint32_t> bitmap;  // bitmap mode only: CIP_BITMAP_WORDS words
+  double density = 0;            // share of all keys the kernel reports (an upper bound)
+  uint32_t dm[12];               // direct modes: pre-filter on the low 32 bits, as in
+  uint32_t dv[12];               // cip_params (an unused entry never matches)
+  uint32_t mode = 0;             // CIP_MODE_*
+  Filter();
 
-    // The kernel's decision for a public key, evaluated on the host.
-    bool matches(const uint8_t pk[32]) const;
+  uint32_t count() const { return (uint32_t)(records.size() / 4); }
+
+  // The kernel's decision for a public key, evaluated on the host.
+  bool matches(const uint8_t pk[32]) const;
 };
 
 // Prefixes must already be normalized (onion::normalize_prefix). The GPU compares the

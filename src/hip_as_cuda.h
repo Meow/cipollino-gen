@@ -5,21 +5,21 @@
 
 #include <hip/hip_runtime.h>
 
-#define cudaError_t hipError_t
-#define cudaSuccess hipSuccess
-#define cudaGetErrorString hipGetErrorString
-#define cudaGetLastError hipGetLastError
-#define cudaGetDeviceCount hipGetDeviceCount
-#define cudaSetDevice hipSetDevice
-#define cudaSetDeviceFlags hipSetDeviceFlags
+#define cudaError_t                    hipError_t
+#define cudaSuccess                    hipSuccess
+#define cudaGetErrorString             hipGetErrorString
+#define cudaGetLastError               hipGetLastError
+#define cudaGetDeviceCount             hipGetDeviceCount
+#define cudaSetDevice                  hipSetDevice
+#define cudaSetDeviceFlags             hipSetDeviceFlags
 #define cudaDeviceScheduleBlockingSync hipDeviceScheduleBlockingSync
-#define cudaDeviceSynchronize hipDeviceSynchronize
-#define cudaDeviceProp hipDeviceProp_t
-#define cudaGetDeviceProperties hipGetDeviceProperties
-#define cudaMemGetInfo hipMemGetInfo
-#define cudaMalloc hipMalloc
-#define cudaFree hipFree
-#define cudaMemset hipMemset
-#define cudaMemcpy hipMemcpy
-#define cudaMemcpyHostToDevice hipMemcpyHostToDevice
-#define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
+#define cudaDeviceSynchronize          hipDeviceSynchronize
+#define cudaDeviceProp                 hipDeviceProp_t
+#define cudaGetDeviceProperties        hipGetDeviceProperties
+#define cudaMemGetInfo                 hipMemGetInfo
+#define cudaMalloc                     hipMalloc
+#define cudaFree                       hipFree
+#define cudaMemset                     hipMemset
+#define cudaMemcpy                     hipMemcpy
+#define cudaMemcpyHostToDevice         hipMemcpyHostToDevice
+#define cudaMemcpyDeviceToHost         hipMemcpyDeviceToHost

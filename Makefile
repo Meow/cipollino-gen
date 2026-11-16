@@ -3,6 +3,7 @@
 #   make            every backend this machine can build: CUDA (nvcc on PATH), ROCm (hipcc),
 #                   Metal (macOS), Vulkan (Vulkan headers + glslangValidator); CPU always
 #   make test       unit tests + exhaustive self-test of every backend that can run here
+#   make format     put the sources into the style of .clang-format
 #   make CUDA=0 ROCM=0 METAL=0 VULKAN=0     leave a backend out
 #   make CUDA_ARCH=sm_86   target a specific GPU generation instead of the one in this
 #                   machine (needed if your nvcc is too old to know -arch=native)
@@ -25,6 +26,7 @@ ROCM_AOS ?= 1
 VULKAN_AOS ?= 1
 PORTABLE ?= 0
 GLSLANG  ?= glslangValidator
+CLANG_FORMAT ?= clang-format
 BUILD    := build
 
 UNAME := $(shell uname -s)
@@ -237,7 +239,13 @@ docker-rocm:
 docker-rocm-test: docker-rocm
 	docker run --rm --device /dev/kfd --device /dev/dri $(DOCKER_IMAGE):rocm-dev make test-gpu
 
+# field13.h is generated and entry_vulkan.comp is GLSL: neither is formatted.
+FORMATTED := $(wildcard src/*.cpp src/*.h src/*.cu src/*.mm tests/*.cpp tests/*.h) $(KERNEL) src/kernel/entry_metal.h
+
+format:
+	$(CLANG_FORMAT) -i $(FORMATTED)
+
 clean:
 	rm -rf $(BUILD) cipollino
 
-.PHONY: all test test-host test-gpu docker docker-test docker-rocm docker-rocm-test clean FORCE
+.PHONY: all test test-host test-gpu docker docker-test docker-rocm docker-rocm-test format clean FORCE
