@@ -211,8 +211,9 @@ namespace {
     }
 
   private:
-    // The kernels need 160-200 registers per thread, so a multiprocessor only holds a few
-    // hundred threads at once; small blocks let it fill up (128 vs 256: +2% on a 4090).
+    // The kernels take up to 168 registers per thread (the build's -maxrregcount), so a
+    // multiprocessor only holds a few hundred threads at once; small blocks let it fill up
+    // (128 vs 256: +2% on a 4090).
     static constexpr unsigned kBlock          = 128;
     static constexpr unsigned kThreadsPerUnit = CIP_THREADS_PER_UNIT;
 

@@ -61,13 +61,15 @@ class Svg:
 def speed(t):
     """Keys per second by device and API: positions on a log axis, ranges as two joined dots."""
     groups = [
-        ("NVIDIA", [("RTX 4090, CUDA", 16.6e9, None, "16.6 G"), ("RTX 4090, Vulkan", 14.5e9, 15.3e9, "14.5 to 15.3 G"),
+        ("NVIDIA", [("RTX 4090, CUDA", 16.4e9, None, "16.4 G"), ("RTX 4090, Vulkan", 14.5e9, 15.3e9, "14.5 to 15.3 G"),
                     ("RTX 3090, CUDA", 6.84e9, None, "6.84 G"), ("RTX 3090, Vulkan", 6.09e9, None, "6.09 G"),
-                    ("RTX 2060 SUPER, CUDA", 2.83e9, None, "2.83 G"), ("GTX 1650 SUPER, CUDA", 1.66e9, None, "1.66 G")]),
-        ("Apple M5 Pro", [("Metal, first 20 s", 1.7e9, None, "1.7 G"), ("Metal, heat-soaked", 1.0e9, 1.5e9, "1.0 to 1.5 G"),
-                          ("CPU, 18 cores", 150e6, None, "150 M")]),
+                    ("RTX 2060 SUPER, CUDA", 2.76e9, None, "2.76 G"), ("RTX 2060 SUPER, Vulkan", 2.71e9, None, "2.71 G"),
+                    ("GTX 1650 SUPER, CUDA", 1.65e9, None, "1.65 G")]),
+        ("Apple M5 Pro", [("Metal", 1.7e9, None, "1.7 G"), ("Vulkan, MoltenVK", 1.7e9, None, "1.7 G")]),
         ("AMD", [("RX 6800 XT, ROCm", 3.82e9, None, "3.82 G"), ("RX 6700 XT, Vulkan", 1.95e9, None, "1.95 G"),
                  ("Radeon 610M, ROCm", 108e6, None, "108 M"), ("Radeon 610M, Vulkan", 93e6, None, "93 M")]),
+        ("CPU", [("Apple M5 Pro, 18 cores", 150e6, None, "150 M"), ("Ryzen 9 7950X, 16 cores", 108e6, None, "108 M"),
+                 ("Ryzen 9 9900X, 12 cores", 106e6, None, "106 M")]),
     ]
     left, right, lo, hi = 190, 610, 7.5, 10.5
     rows = sum(len(items) for _, items in groups)

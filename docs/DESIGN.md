@@ -169,18 +169,22 @@ against 0.013), and a byte of scratch traffic about as much as three multiply-ad
 </picture>
 
 With no scratch traffic at all (not a working configuration) the kernel reaches 17.7 G
-keys/s, the ceiling for this algorithm on this card. Thread length, register limits and
-block size all sit within a few percent. What matters:
+keys/s, the ceiling for this algorithm on this card. Thread length and block size sit
+within a few percent. What matters:
 
 - The scratch slot of the next pair is fetched one pair early (CUDA only), so its cache
   miss overlaps with arithmetic: 9%.
 - The 32x32->64 products are spelled in PTX. Written in C, nvcc hoists the
   zero-extension of loop-invariant operands out of the loop and ptxas then emits a dead
   add after every product: 10%.
-- 2048 threads per multiprocessor: 512 give 14.1 G keys/s, 1024 give 16.0, 2048 give
-  16.6.
-- `lean` scratch: 16.6 G keys/s against 15.0 for `half` and 13.9 for `full`, which
-  saturates the memory bus.
+- 2048 threads per multiprocessor: 512 give 13.6 G keys/s, 1024 give 15.5, 2048 give
+  16.4.
+- At most 168 registers per thread (`-maxrregcount=168`). A multiprocessor shares 65536
+  registers among its warps: 168 a thread let 12 warps in, and a kernel that takes 170
+  is 8% slower. Left to itself ptxas takes 204 for the `half` kernel: 13.8 G keys/s
+  against 16.4.
+- `half` and `lean` scratch are level at 16.2 to 16.5 G keys/s, `half` in half the
+  memory; `full` does 13.7 and saturates the memory bus.
 
 Older cards are slower per multiprocessor: an RTX 3090 (82 of them), an RTX 2060 SUPER
 (34) and a GTX 1650 SUPER (20) all do 83 M keys/s on each, the 4090 130 M. The 3090 is

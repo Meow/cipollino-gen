@@ -94,7 +94,10 @@ endif
 ifeq ($(CUDA),1)
 DEFS      += -DCIP_HAVE_CUDA
 OBJS      += $(BUILD)/backend_cuda.o
-NVCCFLAGS ?= -O3 -arch=$(CUDA_ARCH)
+# A multiprocessor shares 65536 registers among its warps of 32 threads: with 168 a thread
+# 12 warps fit. Left to itself ptxas takes 204 for the half-scratch kernel, which an
+# RTX 4090 then runs 16% slower (13.8 against 16.4 G keys/s).
+NVCCFLAGS ?= -O3 -arch=$(CUDA_ARCH) -maxrregcount=168
 ifeq ($(PORTABLE),1)
 CUDA_PATH ?= $(abspath $(dir $(shell command -v $(NVCC)))/..)
 LDLIBS    += -L$(CUDA_PATH)/lib64 -lcudart_static -ldl -lrt

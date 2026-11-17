@@ -7,6 +7,8 @@ may change between minor versions.
 
 - Vulkan tries the narrow arithmetic on AMD GPUs only: on an Intel UHD 730 under Windows
   it ended the program without a message.
+- CUDA builds limit the kernels to 168 registers per thread. On an RTX 4090 the `half`
+  scratch mode goes from 13.8 to 16.4 G keys/s, level with `lean` in half the memory.
 
 ## 0.3.0
 

@@ -111,7 +111,8 @@ if(CIP_ROCM)
 endif()
 
 if(CIP_CUDA STREQUAL "AUTO" OR CIP_CUDA)
-  # The architecture flag is ours (CIP_CUDA_ARCH), as in the Makefile.
+  # The architecture flag is ours (CIP_CUDA_ARCH), as in the Makefile; so is the register
+  # limit, which is explained there.
   set(CMAKE_CUDA_ARCHITECTURES OFF)
   include(CheckLanguage)
   check_language(CUDA)
@@ -122,7 +123,7 @@ if(CIP_CUDA STREQUAL "AUTO" OR CIP_CUDA)
     list(APPEND cip_gpu_backends cuda)
     set_source_files_properties(src/backend_cuda.cu PROPERTIES
       COMPILE_DEFINITIONS "CIP_SCRATCH_AOS=${CIP_CUDA_AOS}"
-      COMPILE_OPTIONS "-arch=${CIP_CUDA_ARCH}")
+      COMPILE_OPTIONS "-arch=${CIP_CUDA_ARCH};-maxrregcount=168")
   elseif(NOT CIP_CUDA STREQUAL "AUTO")
     message(FATAL_ERROR "CIP_CUDA=${CIP_CUDA}, but no CUDA compiler (nvcc) was found")
   endif()

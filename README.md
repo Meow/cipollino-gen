@@ -137,31 +137,35 @@ Files are named after the public key and created with mode 0600. `--verify` and
 
 | device | backend | keys/s |
 |---|---|---|
-| NVIDIA RTX 4090 | CUDA | 16.6 G |
+| NVIDIA RTX 4090 | CUDA | 16.4 G |
 | NVIDIA RTX 4090, also driving a desktop | Vulkan | 14.5 - 15.3 G |
 | NVIDIA RTX 3090 | CUDA | 6.84 G |
 | NVIDIA RTX 3090 | Vulkan | 6.09 G |
-| NVIDIA RTX 2060 SUPER | CUDA | 2.83 G |
-| NVIDIA GTX 1650 SUPER | CUDA | 1.66 G |
-| Apple M5 Pro, first 20 s | Metal, or Vulkan through MoltenVK | 1.7 G |
-| Apple M5 Pro, heat-soaked | Metal | 1.0 - 1.5 G |
-| Apple M5 Pro, 18 cores | CPU | 150 M |
+| NVIDIA RTX 2060 SUPER | CUDA | 2.76 G |
+| NVIDIA RTX 2060 SUPER | Vulkan | 2.71 G |
+| NVIDIA GTX 1650 SUPER | CUDA | 1.65 G |
+| Apple M5 Pro | Metal | 1.7 G |
+| Apple M5 Pro | Vulkan (MoltenVK) | 1.7 G |
 | AMD Radeon RX 6800 XT | ROCm 10.0 | 3.82 G |
 | AMD Radeon RX 6700 XT | Vulkan (Mesa) | 1.95 G |
 | AMD Radeon 610M (2 compute units) | ROCm 6.4 | 108 M |
 | AMD Radeon 610M | Vulkan (Mesa 25.2) | 93 M |
+| Apple M5 Pro, 18 cores | CPU | 150 M |
+| AMD Ryzen 9 7950X, 16 cores | CPU | 108 M |
+| AMD Ryzen 9 9900X, 12 cores | CPU | 106 M |
 
 Measured with `--bench`: the 4090 and the Radeon 610M in the container images, the 2060
 SUPER, the 1650 SUPER and the RX 6800 XT with the Windows programs, the RX 6700 XT under
-Linux, the RTX 3090 as one GPU of a server. Not tested: Intel GPUs, and the Vulkan
-backend under Windows.
+Linux, the RTX 3090 as one GPU of a server. The M5 Pro slows down as it warms up, which
+is why the table of waits below takes 1.5 G keys/s for it. Not measured: Intel GPUs.
 
 The client key search needs fewer multiplications per key and runs 1.35 to 1.4 times as
 fast:
 
 | device | backend | addresses | client keys |
 |---|---|---|---|
-| Apple M5 Pro, first seconds | Metal | 1.7 G | 2.4 G |
+| NVIDIA RTX 4090 | CUDA | 16.4 G | 22.4 G |
+| Apple M5 Pro | Metal | 1.7 G | 2.4 G |
 | AMD Radeon 610M | ROCm 6.4 | 108 M | 151 M |
 | AMD Radeon 610M | Vulkan (Mesa 25.2) | 93 M | 126 M |
 
